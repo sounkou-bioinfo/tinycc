@@ -2099,6 +2099,13 @@ static void gv_dup(void)
 /* generate CPU independent (unsigned) long long operations */
 static void gen_opl(int op)
 {
+#ifdef TCC_TARGET_WASM32
+    /* wasm32 has native i64 arithmetic/comparison operations.  Do not lower
+       long long expressions through the 32-bit helper-call path, otherwise the
+       wasm32 libtcc1 helper implementations would recursively call themselves
+       and the backend would see helper-call stack shapes it does not own. */
+    gen_opi(op);
+#else
     int t, a, b, op1, c, i;
     int func;
     unsigned short reg_iret = REG_IRET;
@@ -2329,6 +2336,7 @@ static void gen_opl(int op)
         gvtst_set(0, b);
         break;
     }
+#endif
 }
 #endif
 

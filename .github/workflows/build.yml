@@ -78,6 +78,24 @@ jobs:
         cd ..\tests
         call test-win32.bat -c clang all -k
 
+  test-wasm32-emscripten:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+    - name: make & test tcc (wasm32-emscripten)
+      env:
+        TCC_WASM_EMCC_DOCKER_IMAGE: emscripten/emsdk:latest
+      run: |
+        ./configure --config-backtrace=no --config-bcheck=no
+        make -j2 cross-wasm32-emscripten ONE_SOURCE=yes
+        make wasm32-emscripten-libtcc1.a
+        tests/wasm32/run-core-smoke.sh
+        cd tests/wasm32/browser
+        npm install
+        npx playwright install --with-deps chromium
+        npx playwright test
+
   test-armv7-linux:
     runs-on: ubuntu-22.04
     timeout-minutes: 8

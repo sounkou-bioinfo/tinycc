@@ -155,11 +155,13 @@ extern long double strtold (const char *__nptr, char **__endptr);
 /* #define TCC_TARGET_ARM64  *//* ARMv8 code generator */
 /* #define TCC_TARGET_C67    *//* TMS320C67xx code generator */
 /* #define TCC_TARGET_RISCV64 *//* risc-v code generator */
+/* #define TCC_TARGET_WASM32 *//* wasm32 / Emscripten side-module generator */
 
 /* default target is I386 */
 #if !defined(TCC_TARGET_I386) && !defined(TCC_TARGET_ARM) && \
     !defined(TCC_TARGET_ARM64) && !defined(TCC_TARGET_C67) && \
-    !defined(TCC_TARGET_X86_64) && !defined(TCC_TARGET_RISCV64)
+    !defined(TCC_TARGET_X86_64) && !defined(TCC_TARGET_RISCV64) && \
+    !defined(TCC_TARGET_WASM32)
 # if defined __x86_64__
 #  define TCC_TARGET_X86_64
 # elif defined __arm__
@@ -171,6 +173,8 @@ extern long double strtold (const char *__nptr, char **__endptr);
 #  define TCC_TARGET_ARM64
 # elif defined __riscv
 #  define TCC_TARGET_RISCV64
+# elif defined __wasm32__
+#  define TCC_TARGET_WASM32
 # else
 #  define TCC_TARGET_I386
 # endif
@@ -195,6 +199,7 @@ extern long double strtold (const char *__nptr, char **__endptr);
 #  define TCC_IS_NATIVE
 # elif defined __riscv && defined __LP64__ && defined TCC_TARGET_RISCV64
 #  define TCC_IS_NATIVE
+/* wasm32 hosted TCC is not a native executable-memory JIT; it loads side modules. */
 # endif
 #endif
 
@@ -221,6 +226,8 @@ extern long double strtold (const char *__nptr, char **__endptr);
     || defined TARGETOS_NetBSD \
     || defined TARGETOS_FreeBSD_kernel
 # define TARGETOS_BSD 1
+#elif defined TARGETOS_Emscripten
+/* do not alias Emscripten to Linux; wasm output is handled by wasm32-emit.c */
 #elif !(defined TCC_TARGET_PE || defined TCC_TARGET_MACHO)
 # define TARGETOS_Linux 1 /* for tccdefs_.h */
 #endif
@@ -384,6 +391,9 @@ extern long double strtold (const char *__nptr, char **__endptr);
 # include "riscv64-gen.c"
 # include "riscv64-link.c"
 # include "riscv64-asm.c"
+#elif defined(TCC_TARGET_WASM32)
+# include "wasm32-gen.c"
+# include "wasm32-link.c"
 #else
 #error unknown target
 #endif
@@ -967,6 +977,13 @@ struct TCCState {
     uint32_t current_version;
 #endif
 
+#ifdef TCC_TARGET_WASM32
+    unsigned char wasm_side_module;     /* emit Emscripten dylink side module */
+    unsigned char wasm_import_memory;   /* import env.memory */
+    unsigned char wasm_import_table;    /* import env.__indirect_function_table */
+    char *wasm_module_name;             /* optional logical module name */
+#endif
+
 #ifndef ELF_OBJ_ONLY
     int nb_sym_versions;
     struct sym_version *sym_versions;
@@ -1535,6 +1552,7 @@ ST_FUNC Sym *gfunc_set_param(Sym *s, int c, int byref);
 #define TCC_OUTPUT_FORMAT_ELF    0 /* default output format: ELF */
 #define TCC_OUTPUT_FORMAT_BINARY 1 /* binary image output */
 #define TCC_OUTPUT_FORMAT_COFF   2 /* COFF */
+#define TCC_OUTPUT_FORMAT_WASM   3 /* WebAssembly binary module */
 #define TCC_OUTPUT_DYN           TCC_OUTPUT_DLL
 
 #define ARMAG  "!<arch>\n"    /* For COFF and a.out archives */
@@ -1678,6 +1696,16 @@ static inline void write64le(unsigned char *p, uint64_t x) {
 static inline void add64le(unsigned char *p, int64_t x) {
     write64le(p, read64le(p) + x);
 }
+
+/* ------------ wasm32-emit.c ------------ */
+#ifdef TCC_TARGET_WASM32
+ST_FUNC int wasm_output_file(TCCState *s1, const char *filename);
+ST_FUNC int wasm_output_memory(TCCState *s1,
+                               unsigned char **out,
+                               unsigned long *out_len);
+ST_FUNC void wasm_free_buffer(unsigned char *ptr);
+#endif
+
 /* ------------ i386-gen.c ------------ */
 #if defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64 || defined TCC_TARGET_ARM
 ST_FUNC void g(int c);

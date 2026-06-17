@@ -351,6 +351,9 @@ case "$cpu" in
   riscv64)
     cpu="riscv64"
   ;;
+  wasm|wasm32|wasm32-unknown-emscripten)
+    cpu="wasm32"
+  ;;
   *)
     echo "Unsupported CPU"
     exit 1
@@ -406,6 +409,16 @@ case $targetos in
     default tcc_crtprefix "{R}/lib"
     default tcc_elfinterp "/system/bin/linker${S}"
     default tcc_switches "-Wl,-rpath=$sysroot/lib"
+    ;;
+  Emscripten|emscripten)
+    targetos=Emscripten
+    confvars_set Emscripten backtrace=no bcheck=no semlock=0
+    default prefix "/tcc"
+    default tccdir "${prefix}"
+    default includedir "${prefix}/include"
+    default tcc_sysincludepaths "{B}/include:{B}/include/wasm32:{R}/include"
+    default tcc_libpaths "{B}:{R}/lib"
+    default tcc_crtprefix "{R}/lib"
     ;;
   WIN32)
     mingw32="yes"
@@ -642,7 +655,7 @@ cat >$TMPH <<EOF
 #define GCC_MINOR $gcc_minor
 
 #if !(TCC_TARGET_I386 || TCC_TARGET_X86_64 || TCC_TARGET_ARM\
- || TCC_TARGET_ARM64 || TCC_TARGET_RISCV64 || TCC_TARGET_C67)
+ || TCC_TARGET_ARM64 || TCC_TARGET_RISCV64 || TCC_TARGET_C67 || TCC_TARGET_WASM32)
 EOF
 
 predefs=1
@@ -659,6 +672,7 @@ for v in $cpu $confvars ; do
     CONFIG_x86_64=yes)      print_num TCC_TARGET_X86_64 1 ;;
     CONFIG_arm64=yes)       print_num TCC_TARGET_ARM64 1 ;;
     CONFIG_riscv64=yes)     print_num TCC_TARGET_RISCV64 1 ;;
+    CONFIG_wasm32=yes)      print_num TCC_TARGET_WASM32 1 ;;
     CONFIG_arm=yes)         print_num TCC_TARGET_ARM 1
                             print_num CONFIG_TCC_CPUVER "$cpuver" ;;
     CONFIG_arm_eabihf=yes)  print_num TCC_ARM_EABI 1
@@ -670,6 +684,9 @@ for v in $cpu $confvars ; do
     CONFIG_WIN32=yes)       print_num TCC_TARGET_PE 1 ;;
     CONFIG_OSX=yes)         print_num TCC_TARGET_MACHO 1 ;;
     CONFIG_Android=yes)     print_num TARGETOS_ANDROID 1 ;;
+    CONFIG_Emscripten=yes)  print_num TARGETOS_Emscripten 1
+                            print_num CONFIG_TCC_BACKTRACE 0
+                            print_num CONFIG_TCC_BCHECK 0 ;;
     CONFIG_BSD=yes)         print_num TARGETOS_$targetos 1
       case "$targetos" in
         FreeBSD)    default tcc_elfinterp "/libexec/ld-elf.so.1";;

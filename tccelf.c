@@ -1828,6 +1828,16 @@ ST_FUNC void tcc_add_runtime(TCCState *s1)
 #endif
     tcc_add_pragma_libs(s1);
 
+#ifdef TCC_TARGET_WASM32
+    if (!s1->nostdlib) {
+        char path[1024];
+        snprintf(path, sizeof path, "%s/lib/wasm32-libtcc1.c", s1->tcc_lib_path);
+        if (tcc_add_file(s1, path) < 0 && TCC_LIBTCC1[0])
+            tcc_add_support(s1, TCC_LIBTCC1);
+    }
+    return;
+#endif
+
     /* add libc */
     if (!s1->nostdlib) {
         int lpthread = s1->option_pthread;
@@ -3196,6 +3206,14 @@ LIBTCCAPI int tcc_output_file(TCCState *s, const char *filename)
     s->nb_errors = 0;
     if (s->test_coverage)
         tcc_tcov_add_file(s, filename);
+#ifdef TCC_TARGET_WASM32
+    if (s->output_format == TCC_OUTPUT_FORMAT_WASM ||
+        s->output_type == TCC_OUTPUT_WASM || s->output_type == TCC_OUTPUT_WASM_SIDE) {
+        if (s->output_type != TCC_OUTPUT_OBJ && !s->nostdlib)
+            tcc_add_runtime(s);
+        return wasm_output_file(s, filename);
+    }
+#endif
     if (s->output_type == TCC_OUTPUT_OBJ)
         return elf_output_obj(s, filename);
 #ifdef TCC_TARGET_PE
