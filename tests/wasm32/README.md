@@ -20,9 +20,10 @@ tests/wasm32/run-core-smoke.sh
 ```
 
 The smoke path validates generated wasm binaries with `WebAssembly.validate`,
-parses their section/type shape through `tests/wasm32/wasm-inspect.mjs`, and
-keeps a SIMD fixture to prove the validator reports the `simd128` value-type
-mnemonic.
+parses their section/type shape through `tests/wasm32/wasm-inspect.mjs`, keeps a
+SIMD fixture to prove the validator reports the `simd128` value-type mnemonic,
+and runs `tests/wasm32/run-differential-smoke.mjs` to compare curated wasm32
+exports against the same C compiled by native TinyCC.
 
 Emscripten-only checks run in Docker when host `emcc` is unavailable; set
 `TCC_WASM_EMCC_DOCKER_IMAGE=ghcr.io/r-wasm/webr:main` to use the webR image as
@@ -84,6 +85,17 @@ emcc -O0 tests/wasm32/dlopen-main.c \
   -o dlopen-main.mjs
 node dlopen-main.mjs
 ```
+
+Native TinyCC vs wasm32 differential smoke:
+
+```sh
+make test-wasm32-differential
+```
+
+The differential manifest lives in `tests/wasm32/differential/cases.json`.
+It intentionally starts with the backend's validated straight-line subset; known
+next gaps are tracked as xfails in that manifest rather than pretending the full
+TinyCC suite is runnable as wasm today.
 
 Browser/Playwright execution smoke:
 
