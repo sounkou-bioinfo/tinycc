@@ -7,11 +7,22 @@ Build a wasm32 TinyCC after applying the series:
 make cross-wasm32-emscripten ONE_SOURCE=yes
 ```
 
-Run the wasm32 smoke entrypoint:
+Run the wasm32 validation target:
+
+```sh
+make test-wasm32-emscripten
+```
+
+Or run the smoke entrypoint directly:
 
 ```sh
 tests/wasm32/run-core-smoke.sh
 ```
+
+The smoke path validates generated wasm binaries with `WebAssembly.validate`,
+parses their section/type shape through `tests/wasm32/wasm-inspect.mjs`, and
+keeps a SIMD fixture to prove the validator reports the `simd128` value-type
+mnemonic.
 
 Emscripten-only checks run in Docker when host `emcc` is unavailable; set
 `TCC_WASM_EMCC_DOCKER_IMAGE=ghcr.io/r-wasm/webr:main` to use the webR image as
@@ -74,17 +85,14 @@ emcc -O0 tests/wasm32/dlopen-main.c \
 node dlopen-main.mjs
 ```
 
-Browser/Playwright smoke:
+Browser/Playwright execution smoke:
 
 ```sh
-cd tests/wasm32/browser
-npm install
-npx playwright install chromium
-TCC_WASM_ADD=../../../add.wasm \
-TCC_WASM_RUNTIME=../../../runtime_imports.wasm \
-TCC_WASM_LIBTCC1=../../../libtcc1_helpers.wasm \
-  npx playwright test
+tests/wasm32/run-browser-smoke.sh
 ```
+
+Set `TCC_WASM_INSTALL_BROWSER=1` to make the script install the Chromium
+browser dependency via Playwright before running the tests.
 
 Integration jobs:
 

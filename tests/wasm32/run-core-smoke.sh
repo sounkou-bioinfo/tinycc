@@ -22,13 +22,22 @@ run_node_smoke() {
   "$NODE" tests/wasm32/node-smoke.mjs "$wasm"
 }
 
+inspect_wasm() {
+  "$NODE" tests/wasm32/wasm-inspect.mjs "$@"
+}
+
+inspect_wasm --self-test-simd128
+
 "$TCC" -B. -nostdlib -shared -o add.wasm tests/wasm32/add.c
+inspect_wasm add.wasm --expect-section=type --expect-section=function --expect-section=export --expect-section=code --expect-type=i32 --expect-type=f64
 run_node_smoke add.wasm
 
 "$TCC" -B. -nostdlib -shared -o runtime_imports.wasm tests/wasm32/runtime_imports.c
+inspect_wasm runtime_imports.wasm --expect-section=type --expect-section=import --expect-section=function --expect-section=export --expect-section=code --expect-type=i32 --expect-type=f64
 run_node_smoke runtime_imports.wasm
 
 "$TCC" -B. -shared -o libtcc1_helpers.wasm tests/wasm32/libtcc1_helpers.c
+inspect_wasm libtcc1_helpers.wasm --expect-section=type --expect-section=function --expect-section=export --expect-section=code --expect-type=i32
 run_node_smoke libtcc1_helpers.wasm
 
 "$NODE" --input-type=module <<'NODE'
