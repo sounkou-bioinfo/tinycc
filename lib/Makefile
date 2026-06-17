@@ -35,12 +35,17 @@ endif
 
 XFLAGS += -I$(TOP)
 
+ifneq (,$(filter wasm32 wasm32-emscripten,$(T)))
+ XAR = $(AR)
+endif
+
 I386_O = libtcc1.o $(COMMON_O)
 X86_64_O = libtcc1.o $(COMMON_O)
 ARM_O = libtcc1.o armeabi.o armflush.o $(COMMON_O)
 ARM64_O = lib-arm64.o $(COMMON_O)
 RISCV64_O = lib-arm64.o $(COMMON_O)
 COMMON_O = stdatomic.o atomic.o builtin.o alloca.o alloca-bt.o
+WASM32_O = wasm32-libtcc1.o
 WIN_O = crt1.o crt1w.o wincrt1.o wincrt1w.o dllcrt1.o dllmain.o winex.o
 LIN_O = dsohandle.o
 OSX_O =
@@ -74,6 +79,8 @@ OBJ-arm-eabi = $(OBJ-arm)
 OBJ-arm-eabihf = $(OBJ-arm)
 OBJ-arm-wince = $(ARM_O) $(WIN_O)
 OBJ-riscv64 = $(RISCV64_O) armflush.o $(LIN_O)
+OBJ-wasm32 = $(WASM32_O)
+OBJ-wasm32-emscripten = $(OBJ-wasm32)
 
 OBJ-extra = $(filter $(EXTRA_O),$(OBJ-$T))
 OBJ-libtcc1 = $(addprefix $(X),$(filter-out $(OBJ-extra),$(OBJ-$T)))

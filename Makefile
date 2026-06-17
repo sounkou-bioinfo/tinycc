@@ -121,6 +121,8 @@ DEF-c67            = -DTCC_TARGET_C67 -w # disable warnigs
 DEF-x86_64-FreeBSD = $(DEF-x86_64) -DTARGETOS_FreeBSD
 DEF-x86_64-NetBSD  = $(DEF-x86_64) -DTARGETOS_NetBSD
 DEF-x86_64-OpenBSD = $(DEF-x86_64) -DTARGETOS_OpenBSD
+DEF-wasm32         = -DTCC_TARGET_WASM32 -DTARGETOS_Emscripten
+DEF-wasm32-emscripten = $(DEF-wasm32)
 
 ifeq ($(INCLUDED),no)
 # --------------------------------------------------------------------------
@@ -134,7 +136,7 @@ all: $(PROGS) $(TCCLIBS) $(TCCDOCS)
 
 # cross compiler targets to build
 TCC_X = i386 x86_64 i386-win32 x86_64-win32 x86_64-osx arm arm64 arm64-win32 arm-wince c67
-TCC_X += riscv64 arm64-osx
+TCC_X += riscv64 arm64-osx wasm32 wasm32-emscripten
 # TCC_X += arm-fpa arm-fpa-ld arm-vfp arm-eabi
 
 # cross libtcc1.a targets to build
@@ -172,6 +174,8 @@ TRIPLET-x86_64 = x86_64-linux-gnu
 TRIPLET-arm = arm-linux-gnueabihf
 TRIPLET-arm64 = aarch64-linux-gnu
 TRIPLET-riscv64 = riscv64-linux-gnu
+TRIPLET-wasm32 = wasm32-unknown-emscripten
+TRIPLET-wasm32-emscripten = wasm32-unknown-emscripten
 ifneq ($(TRIPLET-$T),)
 # assume support files in "/usr/<triplet>"
 ROOT-$T = /usr/$(TRIPLET-$T)
@@ -179,6 +183,8 @@ INC-$T = {B}/include:{R}/include
 LIB-$T = {R}/lib:{B}
 CRT-$T = {R}/lib
 endif
+INC-wasm32 = {B}/include/wasm32:{B}/include:{R}/include
+INC-wasm32-emscripten = $(INC-wasm32)
 DEFINES += $(DEF-$T)
 DEFINES += $(if $(ROOT-$T),-DCONFIG_SYSROOT="\"$(ROOT-$T)\"")
 DEFINES += $(if $(CRT-$T),-DCONFIG_TCC_CRTPREFIX="\"$(CRT-$T)\"")
@@ -217,7 +223,8 @@ arm64-osx_FILES = $(arm64_FILES) tccmacho.c
 arm64-win32_FILES = $(arm64_FILES) tccpe.c
 c67_FILES = $(CORE_FILES) c67-gen.c c67-link.c tcccoff.c
 riscv64_FILES = $(CORE_FILES) riscv64-gen.c riscv64-link.c riscv64-asm.c
-
+wasm32_FILES = $(CORE_FILES) wasm32-gen.c wasm32-link.c wasm32-emit.c wasm32-dylink.c wasm32-twir.h
+wasm32-emscripten_FILES = $(wasm32_FILES)
 TCCDEFS_H$(subst yes,,$(CONFIG_predefs)) = tccdefs_.h
 
 # libtcc sources

@@ -53,6 +53,11 @@
 #include "riscv64-gen.c"
 #include "riscv64-link.c"
 #include "riscv64-asm.c"
+#elif defined(TCC_TARGET_WASM32)
+#include "wasm32-gen.c"
+#include "wasm32-link.c"
+#include "wasm32-emit.c"
+#include "wasm32-dylink.c"
 #else
 #error unknown target
 #endif
@@ -65,6 +70,10 @@
 #endif /* ONE_SOURCE */
 
 #include "tcc.h"
+
+#ifdef __EMSCRIPTEN__
+# include <dlfcn.h>
+#endif
 
 /********************************************************/
 /* global variables */
@@ -964,6 +973,22 @@ LIBTCCAPI void tcc_delete(TCCState *s1)
 
 LIBTCCAPI int tcc_set_output_type(TCCState *s, int output_type)
 {
+#ifdef TCC_TARGET_WASM32
+    if (output_type == TCC_OUTPUT_WASM || output_type == TCC_OUTPUT_WASM_SIDE ||
+        output_type == TCC_OUTPUT_DLL || output_type == TCC_OUTPUT_OBJ) {
+        int explicit_side = (output_type == TCC_OUTPUT_WASM_SIDE || output_type == TCC_OUTPUT_DLL);
+        s->output_format = TCC_OUTPUT_FORMAT_WASM;
+        s->wasm_side_module = explicit_side;
+        s->wasm_import_memory = explicit_side;
+        s->wasm_import_table = explicit_side;
+        if (output_type == TCC_OUTPUT_WASM || output_type == TCC_OUTPUT_WASM_SIDE)
+            output_type = explicit_side ? TCC_OUTPUT_DLL : TCC_OUTPUT_OBJ;
+    }
+#else
+    if (output_type == TCC_OUTPUT_WASM || output_type == TCC_OUTPUT_WASM_SIDE)
+        return _tcc_error_noabort("wasm output requested from a non-wasm32 TinyCC build");
+#endif
+
 #ifdef CONFIG_TCC_PIE
     if (output_type == TCC_OUTPUT_EXE)
         output_type |= TCC_OUTPUT_DYN;
@@ -985,8 +1010,10 @@ LIBTCCAPI int tcc_set_output_type(TCCState *s, int output_type)
     tccelf_new(s);
 
     if (output_type == TCC_OUTPUT_OBJ) {
-        /* always elf for objects */
+#ifndef TCC_TARGET_WASM32
+        /* always elf for native objects */
         s->output_format = TCC_OUTPUT_FORMAT_ELF;
+#endif
         return 0;
     }
 
@@ -1007,11 +1034,71 @@ LIBTCCAPI int tcc_set_output_type(TCCState *s, int output_type)
 #else
     /* paths for crt objects */
     tcc_split_path(s, &s->crt_paths, &s->nb_crt_paths, CONFIG_TCC_CRTPREFIX);
+# ifndef TCC_TARGET_WASM32
     if (output_type != TCC_OUTPUT_MEMORY && !s->nostdlib)
         tccelf_add_crtbegin(s); /* may produce errors */
+# endif
 #endif
     return s->nb_errors ? -1 : 0;
 }
+
+LIBTCCAPI int tcc_set_wasm32_emscripten(TCCState *s)
+{
+#ifdef TCC_TARGET_WASM32
+    s->output_format = TCC_OUTPUT_FORMAT_WASM;
+    s->output_type = TCC_OUTPUT_DLL;
+    s->wasm_side_module = 1;
+    s->wasm_import_memory = 1;
+    s->wasm_import_table = 1;
+    s->static_link = 0;
+    s->nostdlib = 1;
+    return 0;
+#else
+    (void)s;
+    return _tcc_error_noabort("tcc_set_wasm32_emscripten requires TCC_TARGET_WASM32");
+#endif
+}
+
+LIBTCCAPI int tcc_output_wasm_to_memory(TCCState *s,
+                                        unsigned char **out,
+                                        unsigned long *out_len)
+{
+#ifdef TCC_TARGET_WASM32
+    return wasm_output_memory(s, out, out_len);
+#else
+    (void)s; (void)out; (void)out_len;
+    return _tcc_error_noabort("wasm output requires TCC_TARGET_WASM32");
+#endif
+}
+
+LIBTCCAPI void tcc_free_wasm_buffer(unsigned char *ptr)
+{
+#ifdef TCC_TARGET_WASM32
+    wasm_free_buffer(ptr);
+#else
+    tcc_free(ptr);
+#endif
+}
+
+LIBTCCAPI void *tcc_wasm_dlopen_symbol(TCCState *s,
+                                       const char *wasm_path,
+                                       const char *symbol)
+{
+#if defined(TCC_TARGET_WASM32) && defined(__EMSCRIPTEN__)
+    void *handle, *sym;
+    (void)s;
+    handle = dlopen(wasm_path, RTLD_NOW | RTLD_GLOBAL);
+    if (!handle)
+        return NULL;
+    sym = dlsym(handle, symbol);
+    return sym;
+#else
+    (void)s; (void)wasm_path; (void)symbol;
+    _tcc_error_noabort("tcc_wasm_dlopen_symbol is only available under Emscripten");
+    return NULL;
+#endif
+}
+
 
 LIBTCCAPI int tcc_add_include_path(TCCState *s, const char *pathname)
 {
