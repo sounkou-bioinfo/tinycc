@@ -1918,10 +1918,11 @@ ST_FUNC void tcc_add_runtime(TCCState *s1)
 
 #ifdef TCC_TARGET_WASM32
     if (!s1->nostdlib) {
+        const char *libtcc1 = TCC_LIBTCC1;
         char path[1024];
         snprintf(path, sizeof path, "%s/lib/wasm32-libtcc1.c", s1->tcc_lib_path);
-        if (tcc_add_file(s1, path) < 0 && TCC_LIBTCC1[0])
-            tcc_add_support(s1, TCC_LIBTCC1);
+        if (tcc_add_file(s1, path) < 0 && libtcc1[0])
+            tcc_add_support(s1, libtcc1);
     }
     return;
 #endif
