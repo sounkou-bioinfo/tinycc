@@ -118,7 +118,11 @@ jobs:
           apt-get install -q -y gcc make
         run: |
             echo "::endgroup::" # flatten 'run container'
-            ./configure && make && make test -k
+            # R-devel treats this warning as significant.  Keep arm64 sources
+            # C90-clean so a declaration cannot drift below a TLS relocation
+            # statement unnoticed.
+            ./configure --extra-cflags=-Werror=declaration-after-statement
+            make && make test -k
 
   test-riscv64-linux:
     runs-on: ubuntu-22.04
