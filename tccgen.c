@@ -4944,6 +4944,9 @@ static int parse_btype(CType *type, AttributeDef *ad, int ignore_label)
             goto basic_type2;
         case TOK_THREAD_LOCAL:
         case TOK___thread:
+#ifdef TCC_TARGET_WASM32
+            tcc_error("wasm32: thread-local storage is not supported");
+#endif
             if (t & VT_TLS)
                 tcc_error("multiple thread-local storage specifiers");
             t |= VT_TLS;

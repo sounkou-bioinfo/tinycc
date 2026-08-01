@@ -28,6 +28,21 @@ inspect_wasm() {
 
 inspect_wasm --self-test-simd128
 
+tls_log="$(mktemp)"
+trap 'rm -f "$tls_log" thread_local_unsupported.wasm' EXIT
+if "$TCC" -B. -nostdlib -shared -o thread_local_unsupported.wasm \
+    tests/wasm32/thread_local_unsupported.c 2>"$tls_log"; then
+  echo "error: wasm32 unexpectedly accepted thread-local storage" >&2
+  exit 1
+fi
+if ! grep -Fq "wasm32: thread-local storage is not supported" "$tls_log"; then
+  cat "$tls_log" >&2
+  echo "error: wasm32 TLS rejection did not use the target-specific diagnostic" >&2
+  exit 1
+fi
+rm -f "$tls_log" thread_local_unsupported.wasm
+trap - EXIT
+
 "$TCC" -B. -nostdlib -shared -o add.wasm tests/wasm32/add.c
 inspect_wasm add.wasm --expect-section=type --expect-section=function --expect-section=export --expect-section=code --expect-type=i32 --expect-type=f64
 run_node_smoke add.wasm
