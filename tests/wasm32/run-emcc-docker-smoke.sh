@@ -8,22 +8,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCKER="${DOCKER:-docker}"
-IMAGE="${TCC_WASM_EMCC_DOCKER_IMAGE:-}"
-
-if [[ -z "$IMAGE" && -x "$(command -v "$DOCKER" 2>/dev/null || true)" ]]; then
-  for candidate in \
-    ghcr.io/r-wasm/webr:main \
-    duckhts/duckdb-wasm-local:latest \
-    ducknng/duckdb-wasm-local:latest \
-    emscripten/emsdk:latest
-  do
-    if "$DOCKER" image inspect "$candidate" >/dev/null 2>&1; then
-      IMAGE="$candidate"
-      break
-    fi
-  done
-fi
-IMAGE="${IMAGE:-emscripten/emsdk:latest}"
+IMAGE="${TCC_WASM_EMCC_DOCKER_IMAGE:-emscripten/emsdk:6.0.5@sha256:76a44fff907397784decc435115d07fcb9587a4f1504977f39f3745e538e3a1e}"
 
 if [[ ! -f "$ROOT/add.wasm" ]]; then
   echo "error: $ROOT/add.wasm not found; run tests/wasm32/run-core-smoke.sh first" >&2

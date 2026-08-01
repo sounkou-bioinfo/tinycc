@@ -76,9 +76,14 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24.18.1
+        cache: npm
+        cache-dependency-path: tests/wasm32/browser/package-lock.json
     - name: make & test tcc (wasm32-emscripten)
       env:
-        TCC_WASM_EMCC_DOCKER_IMAGE: emscripten/emsdk:latest
+        TCC_WASM_EMCC_DOCKER_IMAGE: emscripten/emsdk:6.0.5@sha256:76a44fff907397784decc435115d07fcb9587a4f1504977f39f3745e538e3a1e
         TCC_WASM_INSTALL_BROWSER: 1
       run: |
         ./configure --config-backtrace=no --config-bcheck=no

@@ -104,7 +104,8 @@ tests/wasm32/run-browser-smoke.sh
 ```
 
 Set `TCC_WASM_INSTALL_BROWSER=1` to make the script install the Chromium
-browser dependency via Playwright before running the tests.
+browser dependency via Playwright before running the tests. The smoke uses the
+committed npm lockfile and installs dependencies with `npm ci`.
 
 Integration jobs:
 

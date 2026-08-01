@@ -19,7 +19,7 @@ fi
 
 cd "$ROOT/tests/wasm32/browser"
 if [[ ! -d node_modules ]]; then
-  npm install --no-package-lock
+  npm ci
 fi
 if [[ "${TCC_WASM_INSTALL_BROWSER:-0}" == 1 ]]; then
   npx playwright install --with-deps chromium
