@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TinyCC compiler-in-browser</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3efe4; --panel: #fffdf7; --ink: #1a1a1a;
+      --muted: #6a665c; --accent: #0f766e; --border: #d6cfbf;
+    }
+    body {
+      margin: 0; font-family: "IBM Plex Mono", monospace;
+      background:
+        radial-gradient(circle at top right, rgba(15,118,110,0.10), transparent 35%),
+        radial-gradient(circle at bottom left, rgba(180,83,9,0.10), transparent 30%),
+        var(--bg);
+      color: var(--ink);
+    }
+    main { max-width: 900px; margin: 0 auto; padding: 32px 20px; }
+    h1 { margin: 0 0 8px; font-size: 26px; }
+    p { color: var(--muted); line-height: 1.5; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 14px; padding: 18px; margin-bottom: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.04);
+    }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+    #status { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>TinyCC compiler-in-browser</h1>
+    <p>TinyCC itself, compiled to WebAssembly with Emscripten, compiles C source
+       to a wasm32 side module <em>inside the browser</em>, then dlopens it and
+       calls the result. No native toolchain at runtime.</p>
+    <div class="card"><span id="status">Running…</span></div>
+    <div class="card"><pre id="log"></pre></div>
+  </main>
+
+  <script type="module">
+    import createTccModule from "./tcc-in-wasm.mjs";
+
+    const logNode = document.getElementById("log");
+    const statusNode = document.getElementById("status");
+    const log = (...p) => {
+      logNode.textContent += p.join(" ") + "\n";
+      console.log(...p);
+    };
+
+    // Signals Playwright polls.
+    window.__tccDone = false;
+    window.__tccResult = null;
+    window.__tccError = "";
+
+    (async () => {
+      try {
+        const Module = await createTccModule({ print: log, printErr: log });
+        window.__tccModule = Module;
+        const src = "int add(int a, int b) { return a + b; }";
+        log("> compiling:", src);
+        const result = Module.ccall(
+          "tcc_wasm_compile_call2", "number",
+          ["string", "string", "number", "number"],
+          [src, "add", 2, 40]);
+        const err = Module.ccall("tcc_wasm_last_error", "string", [], []);
+        log("< add(2,40) =", String(result), err ? ("err=" + err) : "");
+        window.__tccResult = result;
+        window.__tccError = err;
+        if (result === 42) {
+          statusNode.textContent = "Passed";
+        } else {
+          statusNode.textContent = "Failed";
+        }
+      } catch (e) {
+        window.__tccError = e && e.message ? e.message : String(e);
+        statusNode.textContent = "Failed";
+        log("ERROR", window.__tccError);
+      } finally {
+        window.__tccDone = true;
+      }
+    })();
+  </script>
+</body>
+</html>

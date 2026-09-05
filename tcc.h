@@ -978,6 +978,8 @@ struct TCCState {
     unsigned char wasm_import_memory;   /* import env.memory */
     unsigned char wasm_import_table;    /* import env.__indirect_function_table */
     char *wasm_module_name;             /* optional logical module name */
+    char **wasm_names;                  /* names referenced by TWIR records */
+    int nb_wasm_names;
 #endif
 
 #ifndef ELF_OBJ_ONLY

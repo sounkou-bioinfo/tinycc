@@ -41,7 +41,8 @@ uintptr_t host_symbol_imports(uintptr_t chunk, uintptr_t sexp)
 {
     uintptr_t n = 0;
 
-    n += (uintptr_t)duckdb_data_chunk_get_size((duckdb_data_chunk)chunk);
+    /* DuckDB's chunk-size result is i64, not pointer-sized.  Its call belongs
+       in reject-unsupported.mjs until the split-register/i64 ABI is lowered. */
     n += (uintptr_t)Rf_length((SEXP)sexp);
 
     /* Keep the declarations live without forcing a real webR/DuckDB runtime in

@@ -25,7 +25,11 @@ if [[ "${TCC_WASM_INSTALL_BROWSER:-0}" == 1 ]]; then
   npx playwright install --with-deps chromium
 fi
 
+if [[ $# == 0 ]]; then
+  set -- wasm32.spec.mjs
+fi
+
 TCC_WASM_ADD="${TCC_WASM_ADD:-$ROOT/add.wasm}" \
 TCC_WASM_RUNTIME="${TCC_WASM_RUNTIME:-$ROOT/runtime_imports.wasm}" \
 TCC_WASM_LIBTCC1="${TCC_WASM_LIBTCC1:-$ROOT/libtcc1_helpers.wasm}" \
-  npx playwright test "$@"
+  npx --no-install playwright test "$@"

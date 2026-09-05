@@ -930,6 +930,10 @@ LIBTCCAPI void tcc_delete(TCCState *s1)
     /* free sections */
     tccelf_delete(s1);
 
+#ifdef TCC_TARGET_WASM32
+    dynarray_reset(&s1->wasm_names, &s1->nb_wasm_names);
+#endif
+
     /* free library paths */
     dynarray_reset(&s1->library_paths, &s1->nb_library_paths);
     dynarray_reset(&s1->crt_paths, &s1->nb_crt_paths);
@@ -1045,14 +1049,13 @@ LIBTCCAPI int tcc_set_output_type(TCCState *s, int output_type)
 LIBTCCAPI int tcc_set_wasm32_emscripten(TCCState *s)
 {
 #ifdef TCC_TARGET_WASM32
-    s->output_format = TCC_OUTPUT_FORMAT_WASM;
-    s->output_type = TCC_OUTPUT_DLL;
-    s->wasm_side_module = 1;
-    s->wasm_import_memory = 1;
-    s->wasm_import_table = 1;
     s->static_link = 0;
     s->nostdlib = 1;
-    return 0;
+    /* Route through tcc_set_output_type so the ELF section state (symtab,
+       text, ...) is created via tccelf_new().  Setting output_type by hand
+       skips that and leaves symtab_section == NULL, which faults on the first
+       put_elf_sym() during compilation. */
+    return tcc_set_output_type(s, TCC_OUTPUT_WASM_SIDE);
 #else
     (void)s;
     return _tcc_error_noabort("tcc_set_wasm32_emscripten requires TCC_TARGET_WASM32");

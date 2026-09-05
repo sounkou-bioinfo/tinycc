@@ -14,6 +14,7 @@
    DuckDB-wasm. */
 
 #define WASM32_TWIR_MAGIC 0x54574952u /* 'TWIR' */
+#define WASM32_MAX_ARGS 32
 
 /* WebAssembly value-type bytes. */
 #define WASM32_VT_VOID 0x40
@@ -77,11 +78,13 @@ typedef struct WasmTwirRec {
    SET_SLOT:   a=slot key, b=src reg, c=value type
    LOAD_MEM:   a=dst reg, b=addr reg, c=value type, d=offset
    STORE_MEM:  a=addr reg, b=src reg, c=value type, d=offset
-   BIN:        a=dst reg, b=lhs reg, c=rhs reg, d=C/TCC op token, vt=result/input vt
+   BIN:        a=dst reg, b=lhs reg, c=rhs reg, d=C/TCC op token, vt=operand vt
+               (comparison result is i32; other results have the operand vt)
    UNARY:      a=dst reg, b=src reg, c=unary op, d=destination vt, vt=source vt
    RETURN:     a=src reg, b=value type
    JUMP:       a=next patch-chain link, b=target TWIR offset
-   JUMP_IF:    a=next patch-chain link, b=target TWIR offset, c=cond reg, d=condition op
+   JUMP_IF:    a=next patch-chain link, b=target TWIR offset, c=lhs i32 reg,
+               d=condition op, imm=rhs i32 reg
    LABEL:      a=label offset
    CALL_ARG:   a=arg reg, b=value type, c=arg ordinal
    CALL:       a=name token, b=arg count, c=result value type, d=result reg

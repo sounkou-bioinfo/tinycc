@@ -473,6 +473,8 @@ test-wasm32 test-wasm32-emscripten:
 	@$(MAKE) --no-print-directory tcc libtcc1.a
 	@$(MAKE) --no-print-directory cross-wasm32-emscripten ONE_SOURCE=yes
 	@tests/wasm32/run-core-smoke.sh
+	@tests/wasm32/run-api-smoke.sh
+	@node tests/wasm32/reject-unsupported.mjs
 	@node tests/wasm32/run-differential-smoke.mjs
 	@tests/wasm32/run-browser-smoke.sh
 
@@ -483,6 +485,11 @@ test-wasm32-differential:
 
 test-wasm32-browser:
 	@tests/wasm32/run-browser-smoke.sh
+
+# compiler-in-browser: emcc-host libtcc, compile C to a wasm side module and
+# dlopen it inside real Chromium (needs docker + node/playwright)
+test-wasm32-hosted:
+	@tests/wasm32/run-hosted-browser-smoke.sh
 # run test(s) from tests2 subdir (see make help)
 tests2.%:
 	@$(MAKE) -C tests/tests2 $@
@@ -515,7 +522,7 @@ distclean: clean
 	@rm -vf config.h config.mak config.texi
 	@rm -vf $(TCCDOCS)
 
-.PHONY: all clean test test-wasm32 test-wasm32-emscripten test-wasm32-differential test-wasm32-browser tar tags ETAGS doc distclean install uninstall FORCE
+.PHONY: all clean test test-wasm32 test-wasm32-emscripten test-wasm32-differential test-wasm32-browser test-wasm32-hosted tar tags ETAGS doc distclean install uninstall FORCE
 
 help:
 	@echo "make"
@@ -536,6 +543,8 @@ help:
 	@echo "   compare curated wasm32 exports against native TinyCC results"
 	@echo "make test-wasm32-browser"
 	@echo "   run the wasm32 Chromium execution smoke against existing wasm artifacts"
+	@echo "make test-wasm32-hosted"
+	@echo "   build TinyCC itself as wasm, then compile and dlopen C inside Chromium"
 	@echo "make tests2.all / make tests2.37 / make tests2.37+"
 	@echo "   run all/single test(s) from tests2, optionally update .expect"
 	@echo "make testspp.all / make testspp.17"

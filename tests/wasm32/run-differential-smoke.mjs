@@ -17,6 +17,7 @@ function run(argv, options = {}) {
   const [cmd, ...args] = argv;
   const res = spawnSync(cmd, args, {
     cwd: root,
+    timeout: 30000,
     encoding: 'utf8',
     stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   });
@@ -33,7 +34,11 @@ function cString(s) {
 
 function cNumberLiteral(value, type) {
   if (type === 'f64') {
-    if (!Number.isFinite(value)) throw new Error(`non-finite f64 literal unsupported: ${value}`);
+    if (value === 'NaN') return 'NAN';
+    if (value === 'Infinity') return 'INFINITY';
+    if (value === '-Infinity') return '(-INFINITY)';
+    if (value === '-0') return '(-0.0)';
+    if (!Number.isFinite(value)) throw new Error(`unsupported f64 literal: ${value}`);
     return Number(value).toPrecision(17);
   }
   return String(Number(value) | 0);
@@ -42,6 +47,7 @@ function cNumberLiteral(value, type) {
 function renderNativeRunner(sourcePath, calls) {
   const lines = [
     '#include <stdio.h>',
+    '#include <math.h>',
     `#include ${cString(sourcePath)}`,
     'int main(void) {',
   ];
@@ -68,7 +74,16 @@ function parseNativeOutput(text) {
     if (!line) continue;
     const eq = line.indexOf('=');
     if (eq < 0) throw new Error(`bad native output line: ${line}`);
-    out.set(line.slice(0, eq), Number(line.slice(eq + 1)));
+    const text = line.slice(eq + 1);
+    let value;
+    if (text === 'inf') value = Infinity;
+    else if (text === '-inf') value = -Infinity;
+    else if (text === 'nan' || text === '-nan') value = NaN;
+    else {
+      value = Number(text);
+      if (Number.isNaN(value)) throw new Error(`bad native number: ${text}`);
+    }
+    out.set(line.slice(0, eq), value);
   }
   return out;
 }
@@ -81,6 +96,9 @@ function wasmExport(exports, name) {
 
 function equalEnough(type, actual, expected) {
   if (type === 'i32') return Object.is(actual | 0, expected | 0);
+  if (Object.is(actual, expected)) return true;
+  if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false;
+  if (actual === 0 && expected === 0) return false; // preserve the sign of zero
   const scale = Math.max(1, Math.abs(actual), Math.abs(expected));
   return Math.abs(actual - expected) <= 1e-12 * scale;
 }
@@ -113,7 +131,7 @@ try {
         const label = `${call.name}:${i}`;
         const expected = native.get(label);
         if (expected === undefined) throw new Error(`native result missing for ${label}`);
-        const actual = Number(fn(...call.cases[i]));
+        const actual = Number(fn(...call.cases[i].map(Number)));
         const matched = equalEnough(call.ret, actual, expected);
         if (call.xfail) {
           if (matched) {

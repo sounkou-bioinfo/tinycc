@@ -68,3 +68,18 @@ tests/vla_test
 tests/hello
 tests/tests2/fred.txt
 libtcc.dylib
+
+# emcc-hosted compiler-in-browser build outputs
+tests/wasm32/browser/tcc-in-wasm.mjs
+tests/wasm32/browser/tcc-in-wasm.wasm
+tests/wasm32/browser/test-results/
+tests/wasm32/browser/node_modules/
+
+# wasm smoke outputs (source/validator fixtures are not ignored)
+/add.wasm
+/runtime_imports.wasm
+/libtcc1_helpers.wasm
+/emcc-add-golden.wasm
+/dlopen-main.data
+/dlopen-main.mjs
+/dlopen-main.wasm

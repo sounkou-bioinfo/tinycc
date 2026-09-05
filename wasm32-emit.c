@@ -26,8 +26,8 @@ typedef struct WasmFunc {
     int nrec;
     int first_index;
     int type_index;
-    int params[64];
-    int param_slots[64];
+    int params[WASM32_MAX_ARGS];
+    int param_slots[WASM32_MAX_ARGS];
     int nparams;
     WasmLocal *locals;
     int nlocals;
@@ -39,7 +39,7 @@ typedef struct WasmImport {
     const char *name;
     int ret_vt;
     int argc;
-    int argv[32];
+    int argv[WASM32_MAX_ARGS];
     int type_index;
     int func_index;
 } WasmImport;
@@ -176,15 +176,17 @@ static int same_import_sig(WasmImport *im, int token, int argc, int *argv, int r
     return 1;
 }
 
-static const char *wasm32_safe_tok_name(int token, const char *prefix)
+static const char *wasm32_safe_tok_name(TCCState *s1, int token, const char *prefix)
 {
-    char buf[96];
+    char buf[96], *name;
     int base = token & ~SYM_FIELD;
     if (base >= TOK_IDENT && base < tok_ident &&
         table_ident && table_ident[base - TOK_IDENT])
         return get_tok_str(base, NULL);
     snprintf(buf, sizeof buf, "%s_%x", prefix, (unsigned)token);
-    return tcc_strdup(buf);
+    name = tcc_strdup(buf);
+    dynarray_add(&s1->wasm_names, &s1->nb_wasm_names, name);
+    return name;
 }
 
 static WasmImport *find_or_add_import(WasmModule *m, int token, const char *name,
@@ -197,7 +199,7 @@ static WasmImport *find_or_add_import(WasmModule *m, int token, const char *name
             return &m->imports[i];
     im = module_add_import(m);
     im->token = token;
-    im->name = name ? name : wasm32_safe_tok_name(token, "import");
+    im->name = name ? name : wasm32_safe_tok_name(m->s1, token, "import");
     im->argc = argc;
     im->ret_vt = ret;
     for (i = 0; i < argc; ++i)
@@ -228,7 +230,7 @@ static void scan_twir(TCCState *s1, WasmModule *m)
 {
     unsigned long off, end = text_section->data_offset;
     WasmFunc *f = NULL;
-    int pending_argc = 0, pending_argv[32];
+    int pending_argc = 0, pending_argv[WASM32_MAX_ARGS];
 
     for (off = 0; off + sizeof(WasmTwirRec) <= end; off += sizeof(WasmTwirRec)) {
         WasmTwirRec *r = (WasmTwirRec *)(text_section->data + off);
@@ -238,7 +240,7 @@ static void scan_twir(TCCState *s1, WasmModule *m)
         case TWIR_FUNC_BEGIN:
             f = module_add_func(m);
             f->token = r->a;
-            f->name = r->imm ? (const char *)(uintptr_t)r->imm : wasm32_safe_tok_name(r->a, "func");
+            f->name = r->imm ? (const char *)(uintptr_t)r->imm : wasm32_safe_tok_name(s1, r->a, "func");
             f->ret_vt = r->b;
             f->variadic = r->c;
             f->first = r;
@@ -336,6 +338,39 @@ static int bin_opcode_float(int op, int vt)
     return -1;
 }
 
+static int unary_opcode(int op, int src, int dst)
+{
+    switch (op) {
+    case TWIR_U_NEG:
+        if (src == dst) {
+            if (src == WASM32_VT_F32) return 0x8c;
+            if (src == WASM32_VT_F64) return 0x9a;
+        }
+        break;
+    case TWIR_U_TRUNC_S:
+    case TWIR_U_TRUNC_U:
+        if (dst == WASM32_VT_I32) {
+            if (src == WASM32_VT_F32) return 0xa8 + (op == TWIR_U_TRUNC_U);
+            if (src == WASM32_VT_F64) return 0xaa + (op == TWIR_U_TRUNC_U);
+        }
+        break;
+    case TWIR_U_CONVERT_S:
+    case TWIR_U_CONVERT_U:
+        if (src == WASM32_VT_I32) {
+            if (dst == WASM32_VT_F32) return 0xb2 + (op == TWIR_U_CONVERT_U);
+            if (dst == WASM32_VT_F64) return 0xb7 + (op == TWIR_U_CONVERT_U);
+        }
+        break;
+    case TWIR_U_PROMOTE:
+        if (src == WASM32_VT_F32 && dst == WASM32_VT_F64) return 0xbb;
+        break;
+    case TWIR_U_DEMOTE:
+        if (src == WASM32_VT_F64 && dst == WASM32_VT_F32) return 0xb6;
+        break;
+    }
+    return -1;
+}
+
 static void emit_const(WasmBuf *b, int vt, uint64_t imm)
 {
     if (vt == WASM32_VT_I64) {
@@ -398,9 +433,14 @@ static void prescan_locals(WasmFunc *f)
             local_index(f, 0, r->b, r->c, 0);
             break;
         case TWIR_BIN:
-            local_index(f, 0, r->a, r->vt, 0);
+            local_index(f, 0, r->a,
+                        r->d >= TOK_ULT && r->d <= TOK_GT ? WASM32_VT_I32 : r->vt, 0);
             local_index(f, 0, r->b, r->vt, 0);
             local_index(f, 0, r->c, r->vt, 0);
+            break;
+        case TWIR_UNARY:
+            local_index(f, 0, r->a, r->d, 0);
+            local_index(f, 0, r->b, r->vt, 0);
             break;
         case TWIR_RETURN:
             if (r->b != WASM32_VT_VOID)
@@ -413,16 +453,232 @@ static void prescan_locals(WasmFunc *f)
             if (r->c != WASM32_VT_VOID)
                 local_index(f, 0, r->d, r->c, 0);
             break;
+        case TWIR_JUMP_IF:
+            /* comparison operands re-materialised at the branch site */
+            local_index(f, 0, r->c, WASM32_VT_I32, 0);
+            local_index(f, 0, (int)r->imm, WASM32_VT_I32, 0);
+            break;
         default:
             break;
         }
     }
 }
 
-static void emit_func_body(WasmModule *m, WasmFunc *f, WasmBuf *body)
+/* Emit one straight-line record.  Control-flow records (JUMP/JUMP_IF) are
+   handled by emit_structured(); anything unexpected traps. */
+static void emit_record(WasmModule *m, WasmFunc *f, WasmBuf *body, WasmTwirRec *r)
 {
-    int i, nonparams = 0;
+    TCCState *s1 = m->s1;
+    int dst, src, lhs, rhs, opc, idx;
+    switch (r->tag) {
+    case TWIR_FUNC_BEGIN:
+    case TWIR_PARAM:
+    case TWIR_FUNC_END:
+        break;
+    case TWIR_SET_CONST:
+        dst = local_index(f, 0, r->a, r->b, 0);
+        emit_const(body, r->b, r->imm);
+        emit_local_set(body, dst);
+        break;
+    case TWIR_MOV:
+        dst = local_index(f, 0, r->a, r->c, 0);
+        src = local_index(f, 0, r->b, r->c, 0);
+        emit_local_get(body, src);
+        emit_local_set(body, dst);
+        break;
+    case TWIR_GET_SLOT:
+        dst = local_index(f, 0, r->a, r->c, 0);
+        src = local_index(f, 1, r->b, r->c, 0);
+        emit_local_get(body, src);
+        emit_local_set(body, dst);
+        break;
+    case TWIR_SET_SLOT:
+        dst = local_index(f, 1, r->a, r->c, 0);
+        src = local_index(f, 0, r->b, r->c, 0);
+        emit_local_get(body, src);
+        emit_local_set(body, dst);
+        break;
+    case TWIR_LOAD_MEM:
+        dst = local_index(f, 0, r->a, r->c, 0);
+        src = local_index(f, 0, r->b, WASM32_VT_I32, 0);
+        emit_local_get(body, src);
+        if (r->d) { emit_const(body, WASM32_VT_I32, r->d); wb_put(body, 0x6a); }
+        wb_put(body, r->c == WASM32_VT_I64 ? 0x29 : r->c == WASM32_VT_F32 ? 0x2a : r->c == WASM32_VT_F64 ? 0x2b : 0x28);
+        wb_uleb(body, r->c == WASM32_VT_I64 || r->c == WASM32_VT_F64 ? 3 : 2);
+        wb_uleb(body, 0);
+        emit_local_set(body, dst);
+        break;
+    case TWIR_STORE_MEM:
+        dst = local_index(f, 0, r->a, WASM32_VT_I32, 0);
+        src = local_index(f, 0, r->b, r->c, 0);
+        emit_local_get(body, dst);
+        if (r->d) { emit_const(body, WASM32_VT_I32, r->d); wb_put(body, 0x6a); }
+        emit_local_get(body, src);
+        wb_put(body, r->c == WASM32_VT_I64 ? 0x37 : r->c == WASM32_VT_F32 ? 0x38 : r->c == WASM32_VT_F64 ? 0x39 : 0x36);
+        wb_uleb(body, r->c == WASM32_VT_I64 || r->c == WASM32_VT_F64 ? 3 : 2);
+        wb_uleb(body, 0);
+        break;
+    case TWIR_BIN:
+        lhs = local_index(f, 0, r->b, r->vt, 0);
+        rhs = local_index(f, 0, r->c, r->vt, 0);
+        dst = local_index(f, 0, r->a,
+                          r->d >= TOK_ULT && r->d <= TOK_GT ? WASM32_VT_I32 : r->vt, 0);
+        emit_local_get(body, lhs);
+        emit_local_get(body, rhs);
+        opc = (r->vt == WASM32_VT_F32 || r->vt == WASM32_VT_F64)
+            ? bin_opcode_float(r->d, r->vt) : bin_opcode_i32(r->d, r->vt, r->vt);
+        if (opc < 0)
+            tcc_error_noabort("wasm32: unsupported binary operation %d (type %x)", r->d, r->vt);
+        wb_put(body, opc < 0 ? 0 : opc);
+        emit_local_set(body, dst);
+        break;
+    case TWIR_UNARY:
+        src = local_index(f, 0, r->b, r->vt, 0);
+        dst = local_index(f, 0, r->a, r->d, 0);
+        emit_local_get(body, src);
+        opc = unary_opcode(r->c, r->vt, r->d);
+        if (opc < 0)
+            tcc_error_noabort("wasm32: unsupported unary operation %d (%x -> %x)", r->c, r->vt, r->d);
+        wb_put(body, opc < 0 ? 0 : opc);
+        emit_local_set(body, dst);
+        break;
+    case TWIR_CALL_ARG:
+        src = local_index(f, 0, r->a, r->b, 0);
+        emit_local_get(body, src);
+        break;
+    case TWIR_CALL:
+        idx = func_index_of(m, r->a);
+        if (idx < 0)
+            tcc_error_noabort("wasm32: unresolved call token %d", r->a);
+        else { wb_put(body, 0x10); wb_uleb(body, idx); }
+        if (r->c != WASM32_VT_VOID) {
+            dst = local_index(f, 0, r->d, r->c, 0);
+            emit_local_set(body, dst);
+        }
+        break;
+    case TWIR_RETURN:
+        if (r->b != WASM32_VT_VOID) {
+            src = local_index(f, 0, r->a, r->b, 0);
+            emit_local_get(body, src);
+        }
+        wb_put(body, 0x0f);
+        break;
+    default:
+        tcc_error_noabort("wasm32: unsupported TWIR record %d", r->tag);
+        break;
+    }
+}
+
+/* Structured control flow via a program-counter dispatch loop.  Basic blocks
+   are split at jump targets and after jumps/returns; a br_table on a $pc local
+   dispatches into a nest of blocks, each block re-setting $pc and branching
+   back to the loop.  This handles arbitrary (even irreducible) jump graphs at
+   the cost of optimality -- the standard relooper/stackify fallback. */
+static void emit_structured(TCCState *s1, WasmModule *m, WasmFunc *f, WasmBuf *body, int pc_local)
+{
+    int nrec = f->nrec, i, blk, n, cur;
+    unsigned long first_off = (unsigned long)((char *)f->first - (char *)text_section->data);
+    long REC = (long)sizeof(WasmTwirRec);
+    char *leader = tcc_mallocz(nrec ? nrec : 1);
+    int *blockof = tcc_malloc((nrec ? nrec : 1) * sizeof(int));
+
+    leader[0] = 1;
+    for (i = 0; i < nrec; ++i) {
+        int tag = f->first[i].tag;
+        if (tag == TWIR_JUMP || tag == TWIR_JUMP_IF) {
+            long tb = ((long)f->first[i].b - (long)first_off) / REC;
+            if (tb >= 0 && tb < nrec) leader[tb] = 1;
+            if (i + 1 < nrec) leader[i + 1] = 1;
+        } else if (tag == TWIR_RETURN && i + 1 < nrec) {
+            leader[i + 1] = 1;
+        }
+    }
+    cur = -1;
+    for (i = 0; i < nrec; ++i) { if (leader[i]) cur++; blockof[i] = cur; }
+    n = cur + 1;
+
+#define TARGET_BLOCK(off) \
+    (((long)(off) - (long)first_off) / REC >= 0 && \
+     ((long)(off) - (long)first_off) / REC < nrec \
+        ? blockof[((long)(off) - (long)first_off) / REC] : -1)
+
+    /* $pc = 0; block $exit; loop $loop; open n blocks (bb0 innermost) */
+    emit_const(body, WASM32_VT_I32, 0);
+    emit_local_set(body, pc_local);
+    wb_put(body, 0x02); wb_put(body, 0x40);     /* block $exit */
+    wb_put(body, 0x03); wb_put(body, 0x40);     /* loop  $loop */
+    for (i = 0; i < n; ++i) { wb_put(body, 0x02); wb_put(body, 0x40); }
+    emit_local_get(body, pc_local);
+    wb_put(body, 0x0e); wb_uleb(body, n);       /* br_table */
+    for (i = 0; i < n; ++i) wb_uleb(body, i);
+    wb_uleb(body, n + 1);                        /* default -> $exit */
+
+    for (blk = 0; blk < n; ++blk) {
+        int start = -1, endi = -1;
+        wb_put(body, 0x0b);                     /* end bb_blk */
+        for (i = 0; i < nrec; ++i)
+            if (blockof[i] == blk) { if (start < 0) start = i; endi = i; }
+        for (i = start; i <= endi && start >= 0; ++i) {
+            WasmTwirRec *r = f->first + i;
+            if (r->tag == TWIR_JUMP) {
+                int tb = TARGET_BLOCK(r->b);
+                if (tb == blk + 1) {
+                    /* fall through to next block */
+                } else if (tb < 0) {
+                    wb_put(body, 0x0c); wb_uleb(body, n - blk);      /* br $exit */
+                } else {
+                    emit_const(body, WASM32_VT_I32, tb);
+                    emit_local_set(body, pc_local);
+                    wb_put(body, 0x0c); wb_uleb(body, n - 1 - blk);  /* br $loop */
+                }
+            } else if (r->tag == TWIR_JUMP_IF) {
+                int tb = TARGET_BLOCK(r->b);
+                int a = local_index(f, 0, r->c, WASM32_VT_I32, 0);
+                int b = local_index(f, 0, (int)r->imm, WASM32_VT_I32, 0);
+                int opc = bin_opcode_i32(r->d, WASM32_VT_I32, WASM32_VT_I32);
+                emit_local_get(body, a);
+                emit_local_get(body, b);
+                if (opc < 0)
+                    tcc_error_noabort("wasm32: unsupported branch comparison %d", r->d);
+                wb_put(body, opc < 0 ? 0x00 : opc);
+                wb_put(body, 0x04); wb_put(body, 0x40);              /* if */
+                if (tb < 0) {
+                    wb_put(body, 0x0c); wb_uleb(body, (n - blk) + 1);
+                } else {
+                    emit_const(body, WASM32_VT_I32, tb);
+                    emit_local_set(body, pc_local);
+                    wb_put(body, 0x0c); wb_uleb(body, (n - 1 - blk) + 1);
+                }
+                wb_put(body, 0x0b);                                  /* end if */
+            } else {
+                emit_record(m, f, body, r);
+            }
+        }
+    }
+
+    wb_put(body, 0x0b);                          /* end $loop */
+    wb_put(body, 0x0b);                          /* end $exit */
+    if (f->ret_vt != WASM32_VT_VOID)
+        wb_put(body, 0x00);                      /* unreachable fall-off */
+#undef TARGET_BLOCK
+    tcc_free(leader);
+    tcc_free(blockof);
+}
+
+static void emit_func_body(TCCState *s1, WasmModule *m, WasmFunc *f, WasmBuf *body)
+{
+    int i, nonparams = 0, has_cf = 0, pc_local = -1;
     prescan_locals(f);
+    for (i = 0; i < f->nrec; ++i)
+        if (f->first[i].tag == TWIR_JUMP || f->first[i].tag == TWIR_JUMP_IF) {
+            has_cf = 1;
+            break;
+        }
+    /* Reserve the dispatch program-counter local before counting, so it lands
+       in the locals declaration. */
+    if (has_cf)
+        pc_local = local_index(f, 2, 0, WASM32_VT_I32, 0);
+
     for (i = 0; i < f->nlocals; ++i)
         if (!f->locals[i].is_param)
             nonparams++;
@@ -434,109 +690,27 @@ static void emit_func_body(WasmModule *m, WasmFunc *f, WasmBuf *body)
         }
     }
 
-    for (i = 0; i < f->nrec; ++i) {
-        WasmTwirRec *r = f->first + i;
-        int dst, src, lhs, rhs, opc, idx;
-        if (!is_valid_twir(r))
-            continue;
-        switch (r->tag) {
-        case TWIR_FUNC_BEGIN:
-        case TWIR_PARAM:
-            break;
-        case TWIR_SET_CONST:
-            dst = local_index(f, 0, r->a, r->b, 0);
-            emit_const(body, r->b, r->imm);
-            emit_local_set(body, dst);
-            break;
-        case TWIR_MOV:
-            dst = local_index(f, 0, r->a, r->c, 0);
-            src = local_index(f, 0, r->b, r->c, 0);
-            emit_local_get(body, src);
-            emit_local_set(body, dst);
-            break;
-        case TWIR_GET_SLOT:
-            dst = local_index(f, 0, r->a, r->c, 0);
-            src = local_index(f, 1, r->b, r->c, 0);
-            emit_local_get(body, src);
-            emit_local_set(body, dst);
-            break;
-        case TWIR_SET_SLOT:
-            dst = local_index(f, 1, r->a, r->c, 0);
-            src = local_index(f, 0, r->b, r->c, 0);
-            emit_local_get(body, src);
-            emit_local_set(body, dst);
-            break;
-        case TWIR_LOAD_MEM:
-            dst = local_index(f, 0, r->a, r->c, 0);
-            src = local_index(f, 0, r->b, WASM32_VT_I32, 0);
-            emit_local_get(body, src);
-            if (r->d) { emit_const(body, WASM32_VT_I32, r->d); wb_put(body, 0x6a); }
-            wb_put(body, r->c == WASM32_VT_I64 ? 0x29 : r->c == WASM32_VT_F32 ? 0x2a : r->c == WASM32_VT_F64 ? 0x2b : 0x28);
-            wb_uleb(body, r->c == WASM32_VT_I64 || r->c == WASM32_VT_F64 ? 3 : 2);
-            wb_uleb(body, 0);
-            emit_local_set(body, dst);
-            break;
-        case TWIR_STORE_MEM:
-            dst = local_index(f, 0, r->a, WASM32_VT_I32, 0);
-            src = local_index(f, 0, r->b, r->c, 0);
-            emit_local_get(body, dst);
-            if (r->d) { emit_const(body, WASM32_VT_I32, r->d); wb_put(body, 0x6a); }
-            emit_local_get(body, src);
-            wb_put(body, r->c == WASM32_VT_I64 ? 0x37 : r->c == WASM32_VT_F32 ? 0x38 : r->c == WASM32_VT_F64 ? 0x39 : 0x36);
-            wb_uleb(body, r->c == WASM32_VT_I64 || r->c == WASM32_VT_F64 ? 3 : 2);
-            wb_uleb(body, 0);
-            break;
-        case TWIR_BIN:
-            lhs = local_index(f, 0, r->b, r->vt, 0);
-            rhs = local_index(f, 0, r->c, r->vt, 0);
-            dst = local_index(f, 0, r->a, r->vt, 0);
-            emit_local_get(body, lhs);
-            emit_local_get(body, rhs);
-            opc = (r->vt == WASM32_VT_F32 || r->vt == WASM32_VT_F64)
-                ? bin_opcode_float(r->d, r->vt) : bin_opcode_i32(r->d, r->vt, r->vt);
-            if (opc < 0)
-                wb_put(body, 0x00); /* unreachable */
-            else
-                wb_put(body, opc);
-            emit_local_set(body, dst);
-            break;
-        case TWIR_CALL_ARG:
-            src = local_index(f, 0, r->a, r->b, 0);
-            emit_local_get(body, src);
-            break;
-        case TWIR_CALL:
-            idx = func_index_of(m, r->a);
-            if (idx < 0)
-                wb_put(body, 0x00);
-            else { wb_put(body, 0x10); wb_uleb(body, idx); }
-            if (r->c != WASM32_VT_VOID) {
-                dst = local_index(f, 0, r->d, r->c, 0);
-                emit_local_set(body, dst);
-            }
-            break;
-        case TWIR_RETURN:
-            if (r->b != WASM32_VT_VOID) {
-                src = local_index(f, 0, r->a, r->b, 0);
-                emit_local_get(body, src);
-            }
-            wb_put(body, 0x0f);
-            break;
-        case TWIR_TRAP:
-            wb_put(body, 0x00);
-            break;
-        case TWIR_FUNC_END:
-            break;
-        default:
-            /* Control-flow records are kept in TWIR now, but this first binary
-               emitter deliberately lowers only straight-line functions.  The
-               records are not dropped silently: they trap so failures are
-               explicit while the structured-control-flow pass lands. */
-            wb_put(body, 0x00);
-            break;
+    if (getenv("TCC_WASM_TWIR_DUMP")) {
+        static const char *nm[] = {"?","FUNC_BEGIN","FUNC_END","PARAM","SET_CONST",
+            "MOV","GET_SLOT","SET_SLOT","LOAD_MEM","STORE_MEM","BIN","UNARY",
+            "RETURN","JUMP","JUMP_IF","LABEL","CALL_ARG","CALL","TRAP"};
+        for (i = 0; i < f->nrec; ++i) {
+            WasmTwirRec *r = f->first + i;
+            fprintf(stderr, "TWIR[%2d @%4lu] %-10s a=%d b=%d c=%d d=%d imm=%llu\n",
+                i, (unsigned long)((char*)r - (char*)f->first),
+                (r->tag < 19 ? nm[r->tag] : "?"),
+                r->a, r->b, r->c, r->d, (unsigned long long)r->imm);
         }
     }
-    if (f->ret_vt == WASM32_VT_VOID)
-        wb_put(body, 0x0f);
+    if (has_cf) {
+        emit_structured(s1, m, f, body, pc_local);
+    } else {
+        for (i = 0; i < f->nrec; ++i)
+            if (is_valid_twir(f->first + i))
+                emit_record(m, f, body, f->first + i);
+        if (f->ret_vt == WASM32_VT_VOID)
+            wb_put(body, 0x0f);
+    }
     wb_put(body, 0x0b);
 }
 
@@ -632,7 +806,7 @@ static void emit_module(TCCState *s1, WasmModule *m, WasmBuf *out)
     wb_uleb(&code, m->nfuncs);
     for (i = 0; i < m->nfuncs; ++i) {
         tmp.len = 0;
-        emit_func_body(m, &m->funcs[i], &tmp);
+        emit_func_body(s1, m, &m->funcs[i], &tmp);
         wb_uleb(&code, tmp.len);
         wb_bytes(&code, tmp.data, tmp.len);
     }
@@ -676,6 +850,8 @@ ST_FUNC int wasm_output_memory(TCCState *s1, unsigned char **out, unsigned long 
     WasmModule m;
     WasmBuf b = {0,0,0};
     int i;
+    *out = NULL;
+    *out_len = 0;
     memset(&m, 0, sizeof m);
     m.s1 = s1;
     if (!text_section || !text_section->data_offset)
@@ -690,9 +866,13 @@ ST_FUNC int wasm_output_memory(TCCState *s1, unsigned char **out, unsigned long 
         tcc_free(m.funcs[i].locals);
     tcc_free(m.funcs);
     tcc_free(m.imports);
+    if (s1->nb_errors) {
+        tcc_free(b.data);
+        return -1;
+    }
     *out = b.data;
     *out_len = b.len;
-    return s1->nb_errors ? -1 : 0;
+    return 0;
 }
 
 ST_FUNC int wasm_output_file(TCCState *s1, const char *filename)

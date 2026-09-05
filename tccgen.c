@@ -1844,7 +1844,7 @@ static int adjust_bf(SValue *sv, int bit_pos, int bit_size)
 ST_FUNC int gv(int rc)
 {
     int r, r2, r_ok, r2_ok, rc2, bt;
-    int bit_pos, bit_size, size, align;
+    int bit_pos, bit_size;
 
     /* NOTE: get_reg can modify vstack[] */
     if (vtop->type.t & VT_BITFIELD) {
@@ -1882,12 +1882,14 @@ ST_FUNC int gv(int rc)
         }
         r = gv(rc);
     } else {
-        if (is_float(vtop->type.t) && 
+#ifndef TCC_TARGET_WASM32 /* f32.const/f64.const need no data segment */
+        if (is_float(vtop->type.t) &&
             (vtop->r & (VT_VALMASK | VT_LVAL)) == VT_CONST) {
             /* CPUs usually cannot use float constants, so we store them
                generically in data segment */
             init_params p = { rodata_section };
             unsigned long offset;
+            int size, align;
             size = type_size(&vtop->type, &align);
             if (NODATA_WANTED)
                 size = 0, align = 1;
@@ -1897,6 +1899,7 @@ ST_FUNC int gv(int rc)
 	    init_putv(&p, &vtop->type, offset);
 	    vtop->r |= VT_LVAL;
         }
+#endif
 #ifdef CONFIG_TCC_BCHECK
         if (vtop->r & VT_MUSTBOUND) 
             gbound();
@@ -2100,11 +2103,9 @@ static void gv_dup(void)
 static void gen_opl(int op)
 {
 #ifdef TCC_TARGET_WASM32
-    /* wasm32 has native i64 arithmetic/comparison operations.  Do not lower
-       long long expressions through the 32-bit helper-call path, otherwise the
-       wasm32 libtcc1 helper implementations would recursively call themselves
-       and the backend would see helper-call stack shapes it does not own. */
-    gen_opi(op);
+    /* The wasm ABI has i64, but gv()/casts still split long long into two
+       registers on 32-bit targets.  Do not silently emit partial values. */
+    tcc_error("wasm32: long long lowering is not implemented");
 #else
     int t, a, b, op1, c, i;
     int func;
@@ -2511,7 +2512,7 @@ static void gen_opic(int op)
     }
 }
 
-#if defined TCC_TARGET_X86_64 || defined TCC_TARGET_I386 || defined TCC_TARGET_ARM64
+#if defined TCC_TARGET_X86_64 || defined TCC_TARGET_I386 || defined TCC_TARGET_ARM64 || defined TCC_TARGET_WASM32
 # define gen_negf gen_opf
 #elif defined TCC_TARGET_ARM
 void gen_negf(int op)

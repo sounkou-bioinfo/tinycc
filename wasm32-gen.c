@@ -60,8 +60,11 @@ static const char *wasm32_dup_tok_name(int token)
 {
     int base = token & ~SYM_FIELD;
     if (base >= TOK_IDENT && base < tok_ident &&
-        table_ident && table_ident[base - TOK_IDENT])
-        return tcc_strdup(get_tok_str(base, NULL));
+        table_ident && table_ident[base - TOK_IDENT]) {
+        char *name = tcc_strdup(get_tok_str(base, NULL));
+        dynarray_add(&tcc_state->wasm_names, &tcc_state->nb_wasm_names, name);
+        return name;
+    }
     return NULL;
 }
 
@@ -102,6 +105,7 @@ ST_FUNC int wasm32_type_to_valtype(CType *type)
     case VT_LDOUBLE:
         return WASM32_VT_F64;
     case VT_LLONG:
+        tcc_error("wasm32: long long lowering is not implemented");
         return WASM32_VT_I64;
     case VT_PTR:
     case VT_FUNC:
@@ -190,7 +194,13 @@ ST_FUNC int gjmp_append(int n, int t)
 
 ST_FUNC int gjmp(int t)
 {
-    int here = ind;
+    int here;
+    /* In dead code no record is emitted (wasm32_twir_emit is a no-op), so we
+       must not hand back the current ind as a jump handle -- it would alias
+       the next live record and gsym() would corrupt it.  Mirrors riscv64. */
+    if (nocode_wanted)
+        return t;
+    here = ind;
     wasm32_twir_emit(TWIR_JUMP, WASM32_VT_VOID, t, 0, 0, 0, 0);
     wasm32_last_jump = here;
     return here;
@@ -203,9 +213,17 @@ ST_FUNC void gjmp_addr(int a)
 
 ST_FUNC int gjmp_cond(int op, int t)
 {
-    int r = gv(RC_INT);
-    int here = ind;
-    wasm32_twir_emit(TWIR_JUMP_IF, WASM32_VT_I32, t, 0, r, op, 0);
+    /* vtop is VT_CMP: the two operand registers were stashed in cmp_r by
+       gen_opi().  Record both operands + the comparison op; wasm32-emit.c
+       re-materialises "a <op> b" at the branch site.  a=patch chain (t),
+       b=target (patched by gsym), c=lhs reg, d=op, imm=rhs reg. */
+    int a = vtop->cmp_r & 0xff;
+    int b = (vtop->cmp_r >> 8) & 0xff;
+    int here;
+    if (nocode_wanted)
+        return t;
+    here = ind;
+    wasm32_twir_emit(TWIR_JUMP_IF, WASM32_VT_I32, t, 0, a, op, (uint64_t)b);
     wasm32_last_jump = here;
     return here;
 }
@@ -250,9 +268,20 @@ ST_FUNC void load(int r, SValue *sv)
         wasm32_twir_emit(TWIR_SET_CONST, vt, r, vt, 0, 0, wasm32_const_bits(sv, vt));
     } else if (v < VT_CONST) {
         wasm32_twir_emit(TWIR_MOV, vt, r, v, vt, 0, 0);
+    } else if (v == VT_CMP) {
+        /* Materialise a deferred comparison as a 0/1 value: emit "a <op> b"
+           into the destination register (used when the boolean is consumed as
+           a value rather than a branch condition). */
+        int ca = sv->cmp_r & 0xff;
+        int cb = (sv->cmp_r >> 8) & 0xff;
+        wasm32_twir_emit(TWIR_BIN, WASM32_VT_I32, r, ca, cb, sv->cmp_op, 0);
     } else if (v == VT_JMP || v == VT_JMPI) {
-        wasm32_twir_emit(TWIR_SET_CONST, WASM32_VT_I32, r, WASM32_VT_I32, 0, 0, v == VT_JMP);
+        int done;
+        wasm32_twir_emit(TWIR_SET_CONST, WASM32_VT_I32, r, WASM32_VT_I32, 0, 0, v == VT_JMPI);
+        done = gjmp(0);
         gsym(sv->c.i);
+        wasm32_twir_emit(TWIR_SET_CONST, WASM32_VT_I32, r, WASM32_VT_I32, 0, 0, v != VT_JMPI);
+        gsym(done);
     } else {
         tcc_error("wasm32: unsupported load form %x", fr);
     }
@@ -283,22 +312,30 @@ static int cmp_result_op(int op)
 
 ST_FUNC void gen_opi(int op)
 {
-    int r, fr, vt, rvt;
+    int r, fr, vt;
     gv2(RC_INT, RC_INT);
     r = vtop[-1].r;
     fr = vtop[0].r;
     vt = wasm32_type_to_valtype(&vtop[-1].type);
-    rvt = cmp_result_op(op) ? WASM32_VT_I32 : vt;
-    wasm32_twir_emit(TWIR_BIN, rvt, r, r, fr, op, 0);
+    if (cmp_result_op(op)) {
+        /* Defer the comparison (VT_CMP) instead of materialising a 0/1, so
+           tccgen can fold it into a conditional branch via gjmp_cond().
+           Operand registers are stashed in cmp_r, mirroring riscv64/arm64;
+           the compare is emitted at the branch (JUMP_IF) or, when the boolean
+           is used as a value, through the VT_CMP path in load(). */
+        vtop--;
+        vset_VT_CMP(op);
+        vtop->cmp_r = (r & 0xff) | ((fr & 0xff) << 8);
+        return;
+    }
+    wasm32_twir_emit(TWIR_BIN, vt, r, r, fr, op, 0);
     vtop--;
-    if (cmp_result_op(op))
-        vtop->type.t = VT_INT;
     vtop->r = r;
 }
 
 ST_FUNC void gen_opf(int op)
 {
-    int r, fr, vt, rvt;
+    int r, fr, vt, dst;
     if (op == TOK_NEG) {
         r = gv(RC_FLOAT);
         wasm32_twir_emit(TWIR_UNARY, wasm32_type_to_valtype(&vtop->type), r, r, TWIR_U_NEG,
@@ -309,12 +346,20 @@ ST_FUNC void gen_opf(int op)
     r = vtop[-1].r;
     fr = vtop[0].r;
     vt = wasm32_type_to_valtype(&vtop[-1].type);
-    rvt = cmp_result_op(op) ? WASM32_VT_I32 : vt;
-    wasm32_twir_emit(TWIR_BIN, rvt, r, r, fr, op, 0);
+    /* Materialise float comparisons before tccgen inverts a condition.
+       !(a < b) is not a >= b when either operand is NaN.  Testing the i32
+       result through gen_opi preserves that distinction without FP flags. */
+    dst = cmp_result_op(op) ? get_reg(RC_INT) : r;
+    wasm32_twir_emit(TWIR_BIN, vt, dst, r, fr, op, 0);
     vtop--;
-    if (cmp_result_op(op))
+    vtop->r = dst;
+    if (cmp_result_op(op)) {
         vtop->type.t = VT_INT;
-    vtop->r = r;
+        /* gvtst_set also calls us to test a bare float against zero and
+           requires VT_CMP (or a constant), not a materialised register. */
+        vpushi(0);
+        gen_opi(TOK_NE);
+    }
 }
 
 ST_FUNC void gen_cvt_itof(int t)
@@ -322,21 +367,24 @@ ST_FUNC void gen_cvt_itof(int t)
     int src_vt = wasm32_type_to_valtype(&vtop->type);
     int dst_vt = (t & VT_BTYPE) == VT_FLOAT ? WASM32_VT_F32 : WASM32_VT_F64;
     int r = gv(RC_INT);
-    wasm32_twir_emit(TWIR_UNARY, src_vt, REG_FRET, r,
+    int dst = get_reg(RC_FLOAT);
+    wasm32_twir_emit(TWIR_UNARY, src_vt, dst, r,
                      (vtop->type.t & VT_UNSIGNED) ? TWIR_U_CONVERT_U : TWIR_U_CONVERT_S,
                      dst_vt, 0);
-    vtop->r = REG_FRET;
+    vtop->r = dst;
 }
 
 ST_FUNC void gen_cvt_ftoi(int t)
 {
     int src_vt = wasm32_type_to_valtype(&vtop->type);
-    int dst_vt = (t & VT_BTYPE) == VT_LLONG ? WASM32_VT_I64 : WASM32_VT_I32;
     int r = gv(RC_FLOAT);
-    wasm32_twir_emit(TWIR_UNARY, src_vt, REG_IRET, r,
+    int dst = get_reg(RC_INT);
+    if ((t & VT_BTYPE) == VT_LLONG)
+        tcc_error("wasm32: long long lowering is not implemented");
+    wasm32_twir_emit(TWIR_UNARY, src_vt, dst, r,
                      (t & VT_UNSIGNED) ? TWIR_U_TRUNC_U : TWIR_U_TRUNC_S,
-                     dst_vt, 0);
-    vtop->r = REG_IRET;
+                     WASM32_VT_I32, 0);
+    vtop->r = dst;
 }
 
 ST_FUNC void gen_cvt_ftof(int t)
@@ -345,10 +393,10 @@ ST_FUNC void gen_cvt_ftof(int t)
     int dst_vt = (t & VT_BTYPE) == VT_FLOAT ? WASM32_VT_F32 : WASM32_VT_F64;
     int r = gv(RC_FLOAT);
     if (src_vt != dst_vt)
-        wasm32_twir_emit(TWIR_UNARY, src_vt, REG_FRET, r,
+        wasm32_twir_emit(TWIR_UNARY, src_vt, r, r,
                          dst_vt == WASM32_VT_F64 ? TWIR_U_PROMOTE : TWIR_U_DEMOTE,
                          dst_vt, 0);
-    vtop->r = REG_FRET;
+    vtop->r = r;
 }
 
 ST_FUNC int gfunc_sret(CType *vt, int variadic, CType *ret, int *align, int *regsize)
@@ -378,6 +426,8 @@ ST_FUNC void gfunc_prolog(Sym *func_sym)
     while ((sym = sym->next) != NULL) {
         int vt = wasm32_type_to_valtype(&sym->type);
         int slot = i;
+        if (i == WASM32_MAX_ARGS)
+            tcc_error("wasm32: at most %d parameters are supported", WASM32_MAX_ARGS);
         wasm32_twir_emit(TWIR_PARAM, vt, slot, vt, i, 0, 0);
         gfunc_set_param(sym, slot, 0);
         ++i;
@@ -400,6 +450,11 @@ ST_FUNC void gfunc_call(int nb_args)
     SValue *func = vtop - nb_args;
     int i, token = 0, ret_vt = WASM32_VT_I32;
     CType *ft;
+    /* Preserve values such as the first result in g(a)+g(b) across the call.
+       Scalar spills use wasm locals, not an addressable shadow stack. */
+    if (nb_args > WASM32_MAX_ARGS)
+        tcc_error("wasm32: at most %d arguments are supported", WASM32_MAX_ARGS);
+    save_regs(nb_args + 1);
     if (!((func->r & VT_SYM) && ((func->r & (VT_VALMASK | VT_LVAL)) == VT_CONST)))
         tcc_error("wasm32: only direct symbolic calls are implemented in first call ABI");
     token = func->sym->v & ~SYM_FIELD;
@@ -411,7 +466,10 @@ ST_FUNC void gfunc_call(int nb_args)
     for (i = 0; i < nb_args; ++i) {
         SValue *a = func + 1 + i;
         int vt = wasm32_type_to_valtype(&a->type);
-        int ar = (vt == WASM32_VT_F32 || vt == WASM32_VT_F64) ? 8 + (i & 7) : (i & 7);
+        /* Earlier CALL_ARG values already live on the wasm operand stack.
+           Use a free scratch register, not argument-position registers that
+           can overwrite a later argument's still-live source. */
+        int ar = get_reg(vt == WASM32_VT_F32 || vt == WASM32_VT_F64 ? RC_FLOAT : RC_INT);
         load(ar, a);
         wasm32_twir_emit(TWIR_CALL_ARG, vt, ar, vt, i, 0, 0);
     }
@@ -425,7 +483,7 @@ ST_FUNC void gfunc_call(int nb_args)
 
 ST_FUNC void ggoto(void)
 {
-    wasm32_twir_emit(TWIR_TRAP, WASM32_VT_VOID, TOK_GOTO, 0, 0, 0, 0);
+    tcc_error("wasm32: computed goto is not implemented");
 }
 
 ST_FUNC void gen_vla_sp_save(int addr)
