@@ -343,7 +343,7 @@ FORCE:
 # some versions of gnu-make do not recognize 'command' as a shell builtin
 WHICH = sh -c 'command -v $1'
 
-run-if = $(if $(shell $(call WHICH,$1)),$S $1 $2,echo "(skipping $@ - no $1)")
+run-if = $(if $(shell $(call WHICH,$1)),$S $1 $2,@echo "(skipping $@ - no $1)")
 S = $(if $(findstring yes,$(SILENT)),@$(info * $@))
 
 # --------------------------------------------------------------------------
@@ -379,7 +379,7 @@ IR = $(IM) mkdir -p $2 && cp -r $1/. $2
 IM = @echo "-> $2 : $1" ;
 BINCHECK = $(if $(wildcard $(PROGS) *-tcc$(EXESUF)),,@echo "Makefile: nothing found to install" && exit 1)
 
-EXTRA_O = runmain.o bt-exe.o bt-dll.o bt-log.o bcheck.o
+EXTRA_O = runmain.o bt-exe.o bt-dll.o bt-log.o bcheck.o bcheck_run.o
 
 # install progs & libs
 install-unx:
