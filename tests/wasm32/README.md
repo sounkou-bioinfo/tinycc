@@ -1,5 +1,8 @@
 # wasm32 backend smoke tests
 
+See [STATUS.md](STATUS.md) for the upstream-refresh lineage, gate evidence and
+remaining integration work.
+
 Build a wasm32 TinyCC after applying the series:
 
 ```sh
