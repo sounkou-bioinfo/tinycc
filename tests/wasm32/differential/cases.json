@@ -76,5 +76,29 @@
       { "name": "diff_nine_float_call", "ret": "f64", "args": ["f64", "f64"], "cases": [[2.25, 40.5], [-1.75, -3.5]] },
       { "name": "diff_nine_mixed_call", "ret": "f64", "args": ["f64", "f64"], "cases": [[2.25, 40.5], [-1.75, -3.5]] }
     ]
+  },
+  {
+    "file": "memory.c",
+    "calls": [
+      { "name": "mem_sum_i32", "ret": "i32", "args": ["i32*", "i32"], "cases": [[[1, 2, 3, 4], 4], [[-5, 7, 2147483647], 3]] },
+      { "name": "mem_sum_f64", "ret": "f64", "args": ["f64*", "i32"], "cases": [[[1.5, 2, 3.25], 3], [[-0.5], 1]] },
+      { "name": "mem_sum_f32", "ret": "f64", "args": ["f32*", "i32"], "cases": [[[1.5, 0.1, -3], 3]] },
+      { "name": "mem_scale_f64", "ret": "void", "args": ["f64*", "i32", "f64"], "cases": [[[1, 2, 3], 3, 2.5], [[4, 5], 1, -1]] },
+      { "name": "mem_store_f32", "ret": "void", "args": ["f32*", "i32", "f64"], "cases": [[[0, 0, 0], 2, 0.1]] },
+      { "name": "mem_sum_u8", "ret": "i32", "args": ["u8*", "i32"], "cases": [[[200, 100, 1], 3], [[255, 255], 2]] },
+      { "name": "mem_sum_i8", "ret": "i32", "args": ["i8*", "i32"], "cases": [[[-3, 100, -128], 3], [[127], 1]] },
+      { "name": "mem_sum_i16", "ret": "i32", "args": ["i16*", "i32"], "cases": [[[1, -300, 32767, -32768], 4]] },
+      { "name": "mem_sum_u16", "ret": "i32", "args": ["u16*", "i32"], "cases": [[[1, 65535, 40000], 3]] },
+      { "name": "mem_store_u8", "ret": "void", "args": ["u8*", "i32", "i32"], "cases": [[[9, 9, 9, 9], 1, 4660], [[9, 9], 0, -1]] },
+      { "name": "mem_store_i16", "ret": "void", "args": ["i16*", "i32", "i32"], "cases": [[[7, 7, 7], 1, 70000], [[7, 7], 1, -2]] },
+      { "name": "mem_fill_i8", "ret": "void", "args": ["i8*", "i32", "i32"], "cases": [[[0, 0, 0, 0, 0], 5, 125]] },
+      { "name": "mem_swap_ends", "ret": "i32", "args": ["i32*", "i32"], "cases": [[[1, 2, 3, 40], 4]] },
+      { "name": "mem_offset_load", "ret": "i32", "args": ["i32*", "i32"], "cases": [[[10, 20, 30, 40, 50], 2], [[10, 20, 30, 40, 50], -2]] },
+      { "name": "mem_char_local", "ret": "i32", "args": ["i32"], "cases": [[300], [-129], [127]] },
+      { "name": "mem_uchar_local", "ret": "i32", "args": ["i32"], "cases": [[300], [-1]] },
+      { "name": "mem_short_local", "ret": "i32", "args": ["i32"], "cases": [[70000], [-32769]] },
+      { "name": "mem_ushort_local", "ret": "i32", "args": ["i32"], "cases": [[70000], [-1]] },
+      { "name": "mem_char_param", "ret": "i32", "args": ["i32"], "cases": [[300], [-1]] }
+    ]
   }
 ]

@@ -228,6 +228,17 @@ ST_FUNC int gjmp_cond(int op, int t)
     return here;
 }
 
+static uint64_t access_kind(CType *type)
+{
+    int bt = type->t & VT_BTYPE;
+    if (bt == VT_BOOL)
+        return 1 | WASM32_ACCESS_UNSIGNED;
+    if (bt == VT_BYTE || bt == VT_SHORT)
+        return (bt == VT_BYTE ? 1 : 2) |
+               ((type->t & VT_UNSIGNED) ? WASM32_ACCESS_UNSIGNED : 0);
+    return 0;
+}
+
 static int lvalue_slot(SValue *sv)
 {
     int v = sv->r & VT_VALMASK;
@@ -243,20 +254,24 @@ ST_FUNC void load(int r, SValue *sv)
     int vt = wasm32_type_to_valtype(&sv->type);
 
     if (fr & VT_LVAL) {
+        uint64_t kind = access_kind(&sv->type);
         int slot = lvalue_slot(sv);
         if (slot != 0x7fffffff) {
-            wasm32_twir_emit(TWIR_GET_SLOT, vt, r, slot, vt, 0, 0);
+            wasm32_twir_emit(TWIR_GET_SLOT, vt, r, slot, vt, 0, kind);
             return;
         }
         if (v < VT_CONST) {
-            wasm32_twir_emit(TWIR_LOAD_MEM, vt, r, v, vt, sv->c.i, 0);
+            /* tccgen folds any displacement into the address register and
+               leaves stale data in c.i (often the slot of the pointer the
+               address came from), as the arm64 and riscv64 loads assume. */
+            wasm32_twir_emit(TWIR_LOAD_MEM, vt, r, v, vt, 0, kind);
             return;
         }
         if (v == VT_CONST && !(fr & VT_SYM)) {
             /* Absolute wasm linear-memory address.  This is useful in tests and
                for host-provided pointers. */
             wasm32_twir_emit(TWIR_SET_CONST, WASM32_VT_I32, r, WASM32_VT_I32, 0, 0, sv->c.i);
-            wasm32_twir_emit(TWIR_LOAD_MEM, vt, r, r, vt, 0, 0);
+            wasm32_twir_emit(TWIR_LOAD_MEM, vt, r, r, vt, 0, kind);
             return;
         }
         tcc_error("wasm32: unsupported symbolic lvalue load");
@@ -299,7 +314,8 @@ ST_FUNC void store(int r, SValue *sv)
     if (slot != 0x7fffffff) {
         wasm32_twir_emit(TWIR_SET_SLOT, vt, slot, r, vt, 0, 0);
     } else if (v < VT_CONST) {
-        wasm32_twir_emit(TWIR_STORE_MEM, vt, v, r, vt, sv->c.i, 0);
+        wasm32_twir_emit(TWIR_STORE_MEM, vt, v, r, vt, 0,
+                         access_kind(&sv->type));
     } else {
         tcc_error("wasm32: unsupported store form %x", fr);
     }

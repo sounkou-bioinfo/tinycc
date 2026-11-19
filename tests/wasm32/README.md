@@ -84,10 +84,14 @@ Current staging scope (beyond v0.1.0-alpha):
   sufficient. This includes DuckDB `idx_t` results: their old generic smoke
   call is now a rejection test, not a supposed working import. TLS and computed
   goto are also rejected with diagnostics.
-- Still follow-up: addressable locals / general pointers / globals / string
-  literals (need a shadow stack, data segments and relocations). A passing
-  constant-index local-array example is not evidence of a C memory model.
-  `pointer_sum.c` drives that phase.
+- Loads and stores through pointer values are validated for `char`, `short`,
+  `int`, `float` and `double`, signed and unsigned, including narrow stores that
+  must not touch neighbouring bytes. `char`/`short` values held in wasm locals
+  are sign- or zero-extended on read. See `differential/cases/memory.c`.
+- Still follow-up: addressable locals (`&local`, variable-index local arrays),
+  globals and string literals need a shadow stack, data segments and
+  relocations, and are rejected today. A passing constant-index local-array
+  example is not evidence of that memory model.
 - Aggregate, variadic and indirect-call ABIs are not validated. The initial
   backend's `long double` model is an eight-byte alias, not Emscripten's full
   long-double ABI. This is not yet a general webR/Rtinycc FFI implementation.
@@ -117,7 +121,11 @@ make test-wasm32-differential
 ```
 
 The differential manifest lives in `tests/wasm32/differential/cases.json`.
-It covers the supported scalar/control-flow subset, not the full TinyCC suite.
+It covers the supported scalar, control-flow and pointer-argument subset, not
+the full TinyCC suite. A pointer argument is written `"<elem>*"` (`i8`, `u8`,
+`i16`, `u16`, `i32`, `u32`, `f32`, `f64`) with an array value. The harness copies
+the array into native and wasm memory with a guard element on each side, and
+compares the result, every element after the call, and the guards.
 To also use GCC as the native oracle:
 
 ```sh

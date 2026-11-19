@@ -2,34 +2,35 @@
 
 ## Source lineage
 
-- Published fork fetched at `54062ef0`; Rtinycc currently vendors `76cbba94`.
-  The intervening fork patch fixes signed multicharacter-shift overflow.
-- Upstream `mob` fetched at `0fb54300`. Merge `2868255c` retains the published
-  fork history and adds these five upstream commits:
+- Published fork `main` at `1bed0f33`, which is also the commit Rtinycc vendors.
+- Upstream `mob` fetched at `0f004a08`. Merge `69c9e88f` keeps the fork history
+  and adds 22 upstream commits from 2026-09-06 to 2026-11-18:
 
-  | Commit | Relevance |
-  | --- | --- |
-  | `128e7893` | Unifies ELF NOTE sections. |
-  | `64552b3f` | Corrects linker boundary-symbol handling (`end`/`_end`). |
-  | `2ba12e83` | Updates compiler documentation to current behavior. |
-  | `1bcec040` | Native TLS/ELF layout fixes; does not implement wasm TLS. |
-  | `0fb54300` | Faster native bounds checking. |
+  | Area | Commits | Relevance |
+  | --- | --- | --- |
+  | Type qualifiers | `4666db32` `0cd015b4` `5f1425ef` `1f214e13` `48f54e59` `c9829912` `f4d81ced` `3dc99dbc` | Qualified array types and parameters match GCC; minimal `restrict`. Frontend, shared by wasm32. |
+  | `_Optional` | `8b58a07b` `0f004a08` | New qualifier and its documentation. |
+  | tccgen fixes | `9db1105c` `2d3eea20` `c638ddfb` | `type_to_str` buffer size, chained designators, pointer-to-float conversions rejected. |
+  | Runtime/linker | `e23dabed` `43c7708b` `32d1c0a5` | `stdatomic` store/fences, musl static link, x86_64 long double to int. |
+  | arm64 | `70adbb12` `aade7baf` `cadc3387` `fa97aa73` `8c8741e0` `f830a169` | `sp` offsets of 4096 and more; new assembler instructions. |
 
-All five were merged together rather than cherry-picked: this is a small,
-coherent upstream increment, and the native suite exercises the relevant TLS,
-linker-symbol and bounds-check paths. Other platform CI remains necessary.
+The batch was merged whole rather than cherry-picked: it applied without
+conflicts, and the frontend changes are covered by the native suite and by the
+wasm32 differential cases, which compile through the same tccgen. The arm64
+and musl changes are not exercised on this host; other platform CI remains
+necessary.
 
-The original dirty checkout was not reset or rebased. Its control-flow and
-hosted-compiler work was copied into the separate `wasm/upstream-refresh`
-worktree and completed in `ed5bdbe0`. No remote branch or Rtinycc vendor pin was
-changed.
+The work lives on the local `wasm/upstream-refresh-2` branch. No remote branch
+or Rtinycc vendor pin was changed.
 
 ## Validated scope
 
 - Clean Linux x86_64 native build and `make test`, including bounds checking:
   `ALL TESTS PASSED` (C90 declaration warnings treated as errors).
-- 166 scalar/control-flow/direct-call comparisons against native TinyCC and,
-  independently, GCC. Includes float edge cases and 9-/32-argument calls.
+- 199 scalar/control-flow/direct-call/pointer-memory comparisons against
+  native TinyCC and, independently, GCC. Includes float edge cases, 9-/32-argument
+  calls, and `char`/`short`/`int`/`float`/`double` loads and stores through
+  pointer arguments with out-of-bounds guards.
 - Nine explicit rejection checks, including wide integer operations, DuckDB's
   i64 result ABI, TLS, computed goto and oversized signatures.
 - Core module validation, Emscripten side-module comparison and `dlopen`, four
@@ -52,9 +53,11 @@ Existing non-C90 compiler warnings remain; this is not a warning-free build.
 
 ## Next dependency-ordered work
 
-1. Implement an addressable shadow stack and data/relocation model, including
-   byte/short memory accesses, aliasing and restoration across calls/returns.
-   Extend `pointer_sum.c` into native/wasm memory-model differential tests.
+1. Implement an addressable shadow stack and data/relocation model: `&local`,
+   variable-index local arrays, globals and string literals, with aliasing and
+   restoration across calls/returns. Pointer-argument loads/stores at every
+   scalar width already pass in `differential/cases/memory.c`; extend that
+   manifest for each new storage class.
 2. Reconcile wasm i64 values/call signatures with the frontend's 32-bit split
    registers. Restore DuckDB `idx_t` calls only with ABI tests, not mock i32
    results. Resolve the long-double ABI discrepancy explicitly.

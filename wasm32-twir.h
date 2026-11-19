@@ -74,10 +74,10 @@ typedef struct WasmTwirRec {
    PARAM:      a=slot key, b=value type, c=parameter ordinal
    SET_CONST:  a=dst reg, b=value type, imm=bits
    MOV:        a=dst reg, b=src reg, c=value type
-   GET_SLOT:   a=dst reg, b=slot key, c=value type
+   GET_SLOT:   a=dst reg, b=slot key, c=value type, imm=C access kind
    SET_SLOT:   a=slot key, b=src reg, c=value type
-   LOAD_MEM:   a=dst reg, b=addr reg, c=value type, d=offset
-   STORE_MEM:  a=addr reg, b=src reg, c=value type, d=offset
+   LOAD_MEM:   a=dst reg, b=addr reg, c=value type, d=offset, imm=C access kind
+   STORE_MEM:  a=addr reg, b=src reg, c=value type, d=offset, imm=C access kind
    BIN:        a=dst reg, b=lhs reg, c=rhs reg, d=C/TCC op token, vt=operand vt
                (comparison result is i32; other results have the operand vt)
    UNARY:      a=dst reg, b=src reg, c=unary op, d=destination vt, vt=source vt
@@ -90,6 +90,12 @@ typedef struct WasmTwirRec {
    CALL:       a=name token, b=arg count, c=result value type, d=result reg
    TRAP:       a=reason token or 0
  */
+
+/* C access kind for memory and slot records.  Width 0 means the full width of
+   the wasm value type; widths 1 and 2 are char/short accesses that the emitter
+   narrows on store and sign- or zero-extends on load. */
+#define WASM32_ACCESS_UNSIGNED 0x100
+#define WASM32_ACCESS_WIDTH(k) ((int)((k) & 0xff))
 
 #ifdef TCC_TARGET_WASM32
 ST_FUNC void wasm32_twir_emit(uint16_t tag, uint16_t vt,
