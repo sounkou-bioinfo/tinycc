@@ -661,4 +661,65 @@ void good_volatile_write(volatile my_struct *s)
     s->arr[0] = 1;
 }
 
+#elif defined test_conditional_array_qualifiers
+
+typedef int Array2[2];
+typedef int Array2x3[2][3];
+
+Array2 *p;
+const Array2 *cp;
+const Array2x3 *cap;
+volatile Array2x3 *vap;
+
+void test(void)
+{
+    (1 ? p : cp)[0][0] = 1;
+    (1 ? cp : p)[0][0] = 2;
+    (1 ? cap : vap)[0][0][0] = 3;
+    (1 ? vap : cap)[0][0][0] = 4;
+}
+
+#elif defined test_restrict_scalar
+
+restrict int object;
+
+#elif defined test_restrict_function_pointer
+
+int (*restrict function_pointer)(void);
+
+#elif defined test_discarded_restrict
+
+typedef int *restrict restricted_pointer;
+
+restricted_pointer *source;
+int **destination;
+
+void test(void)
+{
+    destination = source;
+}
+#elif defined test_ptr_to_double
+
+int main(void)
+{
+    double d = "foo";
+    return 0;
+}
+
+#elif defined test_ptr_to_double_explicit
+
+int main(void)
+{
+    double d = (double)"foo";
+    return 0;
+}
+
+#elif defined test_funcptr_to_double
+
+static double f(double x) { return x; }
+
+int main(void)
+{
+    return (int)f(main);
+}
 #endif
