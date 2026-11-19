@@ -32,6 +32,32 @@ function cString(s) {
   return JSON.stringify(s);
 }
 
+/* Pointer arguments are spelled "<elem>*" in the manifest and take an array
+   of element values.  Each case gets its own buffer; the harness copies it
+   into native and wasm memory, makes the call, then compares both the result
+   and every buffer element, so stray or narrow stores are caught too. */
+const ELEMS = {
+  i8: { c: 'signed char', fmt: '%d', view: Int8Array },
+  u8: { c: 'unsigned char', fmt: '%d', view: Uint8Array },
+  i16: { c: 'short', fmt: '%d', view: Int16Array },
+  u16: { c: 'unsigned short', fmt: '%d', view: Uint16Array },
+  i32: { c: 'int', fmt: '%d', view: Int32Array },
+  u32: { c: 'unsigned', fmt: '%u', view: Uint32Array },
+  f32: { c: 'float', fmt: '%.17g', view: Float32Array },
+  f64: { c: 'double', fmt: '%.17g', view: Float64Array },
+};
+
+function pointee(type) {
+  if (!type.endsWith('*')) return null;
+  const elem = ELEMS[type.slice(0, -1)];
+  if (!elem) throw new Error(`unsupported pointer argument type ${type}`);
+  return elem;
+}
+
+function elemValueType(elem) {
+  return elem.view === Float32Array || elem.view === Float64Array ? 'f64' : 'i32';
+}
+
 function cNumberLiteral(value, type) {
   if (type === 'f64') {
     if (value === 'NaN') return 'NAN';
@@ -54,13 +80,30 @@ function renderNativeRunner(sourcePath, calls) {
   for (const call of calls) {
     call.cases.forEach((args, index) => {
       const label = `${call.name}:${index}`;
-      const renderedArgs = args.map((arg, i) => cNumberLiteral(arg, call.args[i])).join(', ');
+      const buffers = [];
+      const renderedArgs = args.map((arg, i) => {
+        const elem = pointee(call.args[i]);
+        if (!elem) return cNumberLiteral(arg, call.args[i]);
+        const name = `buf_${call.name}_${index}_${i}`;
+        const init = arg.map((x) => cNumberLiteral(x, elemValueType(elem))).join(', ');
+        lines.push(`  static ${elem.c} ${name}[] = { ${init} };`);
+        buffers.push({ name, i, elem, n: arg.length });
+        return name;
+      }).join(', ');
       if (call.ret === 'f64') {
         lines.push(`  printf(${cString(label + '=%.17g\n')}, ${call.name}(${renderedArgs}));`);
       } else if (call.ret === 'i32') {
         lines.push(`  printf(${cString(label + '=%d\n')}, ${call.name}(${renderedArgs}));`);
+      } else if (call.ret === 'void') {
+        lines.push(`  ${call.name}(${renderedArgs});`);
       } else {
         throw new Error(`unsupported return type ${call.ret}`);
+      }
+      for (const b of buffers) {
+        for (let j = 0; j < b.n; ++j) {
+          const cast = b.elem.fmt === '%.17g' ? '(double)' : '';
+          lines.push(`  printf(${cString(`${label}#${b.i}[${j}]=${b.elem.fmt}\n`)}, ${cast}${b.name}[${j}]);`);
+        }
       }
     });
   }
@@ -123,16 +166,54 @@ try {
     const bytes = new Uint8Array(await fs.readFile(wasmPath));
     const summary = inspectWasm(bytes);
     if (!summary.valid) throw new Error(`${wasmPath} failed WebAssembly.validate`);
-    const { instance } = await WebAssembly.instantiate(bytes, createWasmHost().imports);
+    const host = createWasmHost();
+    const { instance } = await WebAssembly.instantiate(bytes, host.imports);
 
     for (const call of group.calls) {
       const fn = wasmExport(instance.exports, call.name);
       for (let i = 0; i < call.cases.length; ++i) {
         const label = `${call.name}:${i}`;
-        const expected = native.get(label);
-        if (expected === undefined) throw new Error(`native result missing for ${label}`);
-        const actual = Number(fn(...call.cases[i].map(Number)));
-        const matched = equalEnough(call.ret, actual, expected);
+        const buffers = [];
+        const args = call.cases[i].map((arg, k) => {
+          const elem = pointee(call.args[k]);
+          if (!elem) return Number(arg);
+          /* One spare element on each side detects stores outside the buffer. */
+          const size = elem.view.BYTES_PER_ELEMENT;
+          const base = host.env.malloc((arg.length + 2) * size);
+          const guard = new elem.view(host.memory.buffer, base, arg.length + 2);
+          guard.fill(0x5a);
+          guard.set(arg.map(Number), 1);
+          buffers.push({ k, elem, base, n: arg.length, sentinel: guard[0] });
+          return base + size;
+        });
+        const result = fn(...args);
+        let matched = true;
+        const mismatches = [];
+        if (call.ret !== 'void') {
+          const expected = native.get(label);
+          if (expected === undefined) throw new Error(`native result missing for ${label}`);
+          const actual = Number(result);
+          if (!equalEnough(call.ret, actual, expected)) {
+            matched = false;
+            mismatches.push(`result wasm=${actual}, native=${expected}`);
+          }
+        }
+        for (const b of buffers) {
+          const view = new b.elem.view(host.memory.buffer, b.base, b.n + 2);
+          if (!Object.is(view[0], b.sentinel) || !Object.is(view[b.n + 1], b.sentinel)) {
+            matched = false;
+            mismatches.push(`argument ${b.k} store outside buffer`);
+          }
+          for (let j = 0; j < b.n; ++j) {
+            const key = `${label}#${b.k}[${j}]`;
+            const expected = native.get(key);
+            if (expected === undefined) throw new Error(`native buffer value missing for ${key}`);
+            if (!equalEnough(elemValueType(b.elem), view[j + 1], expected)) {
+              matched = false;
+              mismatches.push(`${key} wasm=${view[j + 1]}, native=${expected}`);
+            }
+          }
+        }
         if (call.xfail) {
           if (matched) {
             throw new Error(`${group.file} ${label} unexpectedly matched; remove xfail: ${call.xfail}`);
@@ -141,7 +222,7 @@ try {
           continue;
         }
         if (!matched) {
-          throw new Error(`${group.file} ${label} mismatch: wasm=${actual}, native=${expected}`);
+          throw new Error(`${group.file} ${label} mismatch: ${mismatches.join('; ')}`);
         }
         checked++;
       }

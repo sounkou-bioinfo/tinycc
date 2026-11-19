@@ -391,6 +391,50 @@ static void emit_const(WasmBuf *b, int vt, uint64_t imm)
 static void emit_local_get(WasmBuf *b, int idx) { wb_put(b, 0x20); wb_uleb(b, idx); }
 static void emit_local_set(WasmBuf *b, int idx) { wb_put(b, 0x21); wb_uleb(b, idx); }
 
+/* Emit a load (store == 0) or store with memarg align=log2(width), offset 0.
+   Narrow accesses exist only for i32 values: char and short promote to i32. */
+static void emit_memop(WasmBuf *b, int vt, uint64_t kind, int store)
+{
+    int w = WASM32_ACCESS_WIDTH(kind);
+    int uns = (kind & WASM32_ACCESS_UNSIGNED) != 0;
+    int op, align;
+    if (w == 1 || w == 2) {
+        if (store)
+            op = w == 1 ? 0x3a : 0x3b;                 /* i32.store8/16 */
+        else
+            op = (w == 1 ? 0x2c : 0x2e) + uns;         /* i32.load8/16_s/u */
+        align = w == 2;
+    } else {
+        op = vt == WASM32_VT_I64 ? 0x29 : vt == WASM32_VT_F32 ? 0x2a :
+             vt == WASM32_VT_F64 ? 0x2b : 0x28;
+        if (store)
+            op += 0x0e;                                /* *.store */
+        align = vt == WASM32_VT_I64 || vt == WASM32_VT_F64 ? 3 : 2;
+    }
+    wb_put(b, op);
+    wb_uleb(b, align);
+    wb_uleb(b, 0);
+}
+
+/* Sign- or zero-extend the i32 on the operand stack to the C width in kind,
+   using MVP shifts and masks rather than the sign-extension proposal. */
+static void emit_narrow_i32(WasmBuf *b, uint64_t kind)
+{
+    int w = WASM32_ACCESS_WIDTH(kind);
+    if (w != 1 && w != 2)
+        return;
+    if (kind & WASM32_ACCESS_UNSIGNED) {
+        emit_const(b, WASM32_VT_I32, w == 1 ? 0xff : 0xffff);
+        wb_put(b, 0x71);                               /* i32.and */
+    } else {
+        int sh = w == 1 ? 24 : 16;
+        emit_const(b, WASM32_VT_I32, sh);
+        wb_put(b, 0x74);                               /* i32.shl */
+        emit_const(b, WASM32_VT_I32, sh);
+        wb_put(b, 0x75);                               /* i32.shr_s */
+    }
+}
+
 static int func_index_of(WasmModule *m, int token)
 {
     int i;
@@ -490,6 +534,7 @@ static void emit_record(WasmModule *m, WasmFunc *f, WasmBuf *body, WasmTwirRec *
         dst = local_index(f, 0, r->a, r->c, 0);
         src = local_index(f, 1, r->b, r->c, 0);
         emit_local_get(body, src);
+        emit_narrow_i32(body, r->imm);
         emit_local_set(body, dst);
         break;
     case TWIR_SET_SLOT:
@@ -503,9 +548,7 @@ static void emit_record(WasmModule *m, WasmFunc *f, WasmBuf *body, WasmTwirRec *
         src = local_index(f, 0, r->b, WASM32_VT_I32, 0);
         emit_local_get(body, src);
         if (r->d) { emit_const(body, WASM32_VT_I32, r->d); wb_put(body, 0x6a); }
-        wb_put(body, r->c == WASM32_VT_I64 ? 0x29 : r->c == WASM32_VT_F32 ? 0x2a : r->c == WASM32_VT_F64 ? 0x2b : 0x28);
-        wb_uleb(body, r->c == WASM32_VT_I64 || r->c == WASM32_VT_F64 ? 3 : 2);
-        wb_uleb(body, 0);
+        emit_memop(body, r->c, r->imm, 0);
         emit_local_set(body, dst);
         break;
     case TWIR_STORE_MEM:
@@ -514,9 +557,7 @@ static void emit_record(WasmModule *m, WasmFunc *f, WasmBuf *body, WasmTwirRec *
         emit_local_get(body, dst);
         if (r->d) { emit_const(body, WASM32_VT_I32, r->d); wb_put(body, 0x6a); }
         emit_local_get(body, src);
-        wb_put(body, r->c == WASM32_VT_I64 ? 0x37 : r->c == WASM32_VT_F32 ? 0x38 : r->c == WASM32_VT_F64 ? 0x39 : 0x36);
-        wb_uleb(body, r->c == WASM32_VT_I64 || r->c == WASM32_VT_F64 ? 3 : 2);
-        wb_uleb(body, 0);
+        emit_memop(body, r->c, r->imm, 1);
         break;
     case TWIR_BIN:
         lhs = local_index(f, 0, r->b, r->vt, 0);

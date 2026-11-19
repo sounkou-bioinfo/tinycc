@@ -377,7 +377,9 @@
  DEF_ASM(msr)
  DEF_ASM(nop)
  DEF_ASM(wfi)
+ DEF_ASM(wfit)
  DEF_ASM(wfe)
+ DEF_ASM(wfet)
  DEF_ASM(sev)
  DEF_ASM(sevl)
  DEF_ASM(isb)
@@ -571,6 +573,7 @@
 #define ARM64_ADDS_REG    0x2B000000U
 #define ARM64_SUB_REG     0x4B000000U
 #define ARM64_SUBS_REG    0x6B000000U
+#define ARM64_ADD_EXT     0x0B200000U  /* ADD (extended register): Rn 31 is SP */
 #define ARM64_AND_REG     0x0A000000U
 #define ARM64_ANDS_REG    0x6A000000U
 #define ARM64_ORR_REG     0x2A000000U
@@ -669,6 +672,24 @@
 #define ARM64_STP_D_PRE   0x6D800000U
 #define ARM64_STP_D_POST  0x6C800000U
 
+/* Load/store exclusive */
+#define ARM64_LDXR_W      0x885f7c00U
+#define ARM64_LDXR_X      0xC85f7c00U
+#define ARM64_LDXR_B      0x085f7c00U
+#define ARM64_LDXR_H      0x485f7c00U
+#define ARM64_LDAXR_W     0x885ffc00U
+#define ARM64_LDAXR_X     0xC85ffc00U
+#define ARM64_LDAXR_B     0x085ffc00U
+#define ARM64_LDAXR_H     0x485ffc00U
+#define ARM64_STXR_W      0x88007c00U
+#define ARM64_STXR_X      0xC8007c00U
+#define ARM64_STXR_B      0x08007c00U
+#define ARM64_STXR_H      0x48007c00U
+#define ARM64_STLXR_W     0x8800fc00U
+#define ARM64_STLXR_X     0xC800fc00U
+#define ARM64_STLXR_B     0x0800fc00U
+#define ARM64_STLXR_H     0x4800fc00U
+
 /* Branch instructions */
 #define ARM64_B           0x14000000U
 #define ARM64_BL          0x94000000U
@@ -694,6 +715,12 @@
 #define ARM64_MRS_FPSR    0xD53B4420U
 #define ARM64_MSR_FPCR    0xD51B4400U
 #define ARM64_MSR_FPSR    0xD51B4420U
+#define ARM64_WFE         0xD503205FU
+#define ARM64_WFET        0xD5031000U
+#define ARM64_WFI         0xD503207FU
+#define ARM64_WFIT        0xD5031020U
+#define ARM64_SEV         0xD503209FU
+#define ARM64_SEVL        0xD50320BFU
 
 /* Shifts (register) */
 #define ARM64_LSL_REG     0x1AC02000U
@@ -719,6 +746,7 @@
 
 /* Extended register encoding */
 #define ARM64_EXTEND_LSL(lsl) (((uint32_t)(lsl) & 7) << 10)
+#define ARM64_EXTEND_UXTX     (3U << 13)
 
 /* MOV (register) - ORR with zero register */
 #define ARM64_MOV_REG     0x2A0003E0U
@@ -742,6 +770,7 @@
 #define ARM64_RD(r)     ((uint32_t)(r) & 0x1FU)
 #define ARM64_RN(r)     (((uint32_t)(r) & 0x1FU) << 5)
 #define ARM64_RM(r)     (((uint32_t)(r) & 0x1FU) << 16)
+#define ARM64_RS(r)     (((uint32_t)(r) & 0x1FU) << 16)
 #define ARM64_RT(r)     ((uint32_t)(r) & 0x1FU)
 #define ARM64_RT2(r)    (((uint32_t)(r) & 0x1FU) << 10)
 

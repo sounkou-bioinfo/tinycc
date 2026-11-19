@@ -377,7 +377,7 @@ void load(int r, SValue *sv)
     SValue v1;
 
     fr = sv->r;
-    ft = sv->type.t & ~(VT_DEFSIGN|VT_VOLATILE|VT_CONSTANT);
+    ft = sv->type.t & ~(VT_DEFSIGN|VT_QUAL);
     fc = sv->c.i;
 
     if (fc != sv->c.i && (fr & VT_SYM))
@@ -2121,17 +2121,14 @@ void gen_cvt_ftoi(int t)
     ft = vtop->type.t;
     bt = ft & VT_BTYPE;
     if (bt == VT_LDOUBLE) {
-	if (t != VT_INT) {
-	    vpush_helper_func(TOK___fixxfdi);
-	    vswap();
-	    gfunc_call(1);
-	    vpushi(0);
-	    vtop->r = REG_IRET;
+        vpush_helper_func(TOK___fixxfdi);
+        vswap();
+        gfunc_call(1);
+        vpushi(0);
+        vtop->r = REG_IRET;
+        if (t != VT_INT)
 	    vtop->r2 = REG_IRE2;
-	    return;
-	}
-        gen_cvt_ftof(VT_DOUBLE);
-        bt = VT_DOUBLE;
+        return;
     }
 
     gv(RC_FLOAT);
