@@ -20,8 +20,7 @@ wasm32 differential cases, which compile through the same tccgen. The arm64
 and musl changes are not exercised on this host; other platform CI remains
 necessary.
 
-The work lives on the local `wasm/upstream-refresh-2` branch. No remote branch
-or Rtinycc vendor pin was changed.
+Rtinycc still vendors `1bed0f33`; moving its pin is a separate change.
 
 ## Validated scope
 
